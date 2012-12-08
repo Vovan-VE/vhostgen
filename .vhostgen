@@ -134,6 +134,9 @@ my %configVarName = (
 	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE,
 	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
 
+	dirs       => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
+	aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
+
 	path       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	dir0       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
@@ -722,7 +725,7 @@ sub isValidDomainLabel($$) {
 }
 
 { my (@subpath, @domains, @names, @namesCounts);
-	my $totalVHosts = 0;
+	my (%hosts, @host_index);
 
 	sub aliases() {
 		my $names_count = scalar @names;
@@ -794,27 +797,14 @@ sub isValidDomainLabel($$) {
 			$config->{domain} = $bak{domain};
 		}
 
-		# первый элемент всегда будет равен domain'у, поэтому убираем его
-		shift @aliases;
-
-		$config->{alias} = (@aliases)
-			? join(' ', @aliases)
-			: undef
-		;
-		scalar @aliases;
+		$config->{aliases} = \@aliases;
+		1;
 	}
 
 	sub vhostDir() {
-		$config->{extheaders} = ( $config->{headers}->isset() )
-			? $config->{headers}->get()
-			: undef
-		;
-		aliases();
-		ApacheConfVHost();
-		WinHostsAdd();
-
-		print "[+] $config->{domain}\t .$config->{subpath}\n";
-		++$totalVHosts;
+		my $path = $config->{path};
+		$hosts{$path} = $config;
+		push @host_index, $path;
 	}
 
 	sub domainDir();
@@ -832,6 +822,7 @@ sub isValidDomainLabel($$) {
 			push @subpath, $dir;
 			my $level = $#subpath;
 			$config->{'dir' . $level} = $dir;
+			$config->{dirs} = [ @subpath ];
 			$config->{subpath} = '/' . join('/', @subpath);
 			$config->{path}    = Cwd::abs_path( $config->{cwd} . $config->{subpath} );
 
@@ -848,7 +839,7 @@ sub isValidDomainLabel($$) {
 					$config->{'domain' . $level} = lc(
 						(defined $config->{name})
 							? $config->{name}
-							: $dir
+							: $config->{dirs}->[$level]
 					)
 				);
 				unless (isValidDomainLabel($$domain, $level)) {
@@ -856,7 +847,6 @@ sub isValidDomainLabel($$) {
 					last;
 				}
 				push @domains, $$domain;
-				$config->{domain} = join('.', reverse @domains);
 
 				my @dir_aliases = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
 				push @names, \@dir_aliases;
@@ -866,6 +856,7 @@ sub isValidDomainLabel($$) {
 					domainDir();
 				}
 				else {
+					aliases();
 					vhostDir();
 				}
 
@@ -880,9 +871,35 @@ sub isValidDomainLabel($$) {
 		1;
 	}
 
-	sub result() {
-		if ($totalVHosts) {
-			print "\n$totalVHosts virtual hosts created\n";
+	sub generateVhosts() {
+		my $bak = $config;
+		for my $path (@host_index) {
+			$config = $hosts{$path};
+
+			$config->{extheaders} = ( $config->{headers}->isset() )
+				? $config->{headers}->get()
+				: undef
+			;
+
+			my @aliases = @{ $config->{aliases} };
+			# first item will be the main domain name
+			# exclude it from aliases
+			$config->{domain} = shift @aliases;
+
+			$config->{alias} = (@aliases)
+				? join(' ', @aliases)
+				: undef
+			;
+
+			ApacheConfVHost();
+			WinHostsAdd();
+
+			print "[+] $config->{domain}\t $config->{path}\n";
+		}
+		$config = $bak;
+
+		if (@host_index) {
+			print "\n" . scalar(@host_index). " virtual hosts created\n";
 		}
 		else {
 			print "No virtual hosts created\n";
@@ -892,5 +909,5 @@ sub isValidDomainLabel($$) {
 
 init();
 domainDir();
-result();
+generateVhosts();
 1;
