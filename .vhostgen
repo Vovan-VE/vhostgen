@@ -649,8 +649,8 @@ sub init () {
 	chdir $cwd or die "Unable to change working directory to $cwd\n";
 	print "cwd is $cwd\n";
 
-	$config->{cwd} = $cwd;
-	$config->{cwd} =~ tr{\\}{/};
+	$config->{cwd}  = $cwd;
+	$config->{cwd}  =~ tr{\\}{/};
 	$config->{path} = $config->{cwd};
 	$config->{subpath} = '';
 
@@ -827,12 +827,15 @@ sub isValidDomainLabel($$) {
 				@dirs;
 		for my $dir (@dirs) {
 			configPush();
-			push @subpath, $dir;
 			$config->{depth}--;
-			$config->{'dir' . $#subpath} = $dir;
+
+			push @subpath, $dir;
+			my $level = $#subpath;
+			$config->{'dir' . $level} = $dir;
 			$config->{subpath} = '/' . join('/', @subpath);
-			$config->{path}    = $config->{cwd} . $config->{subpath};
-			my $cfg = '.' . $config->{subpath} . '/' .  CONFIG_DIR_FILE;
+			$config->{path}    = Cwd::abs_path( $config->{cwd} . $config->{subpath} );
+
+			my $cfg = $config->{path} . '/' .  CONFIG_DIR_FILE;
 			eval {
 				readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
 			};
@@ -842,14 +845,14 @@ sub isValidDomainLabel($$) {
 			TRY: {
 				last if defined $config->{skip};
 				my $domain = \(
-					$config->{'domain' . $#subpath} = lc(
+					$config->{'domain' . $level} = lc(
 						(defined $config->{name})
 							? $config->{name}
 							: $dir
 					)
 				);
-				unless (isValidDomainLabel($$domain, $#subpath)) {
-					warn "Invalid domain \"$$domain\" in \".$config->{subpath}\" ignored.\n";
+				unless (isValidDomainLabel($$domain, $level)) {
+					warn "Invalid domain \"$$domain\" in \"$config->{path}\" ignored.\n";
 					last;
 				}
 				push @domains, $$domain;
