@@ -429,38 +429,63 @@ sub readConfig ($\%$) {
 		pos($data) = 0;
 		my $line = 1;
 		while ($data =~ /
-				^                                   # start of line
-				\h*                                 # skip leading horizontal spaces
-				(?:                                 # optional one of:
-					\#.*                            #   comment
-				|                                   # or
-					(?<name> [a-z_][a-z_0-9]* )     #   (option name)
-					(?:                             #   optional with:
-						\h+                         #     horizantal spaces
-						(?:                         #     one of:
-							(?<ml> <<<<\n )         #       (open multiline marker with new line)
-							(?:                     #       optional content:
-								(?<mlv>             #         (multiline value)
+				# start of line
+				^
+				# skip leading horizontal spaces
+				\h*
+				# optional one of:
+				(?:
+					# comment
+					\#.*
+				|
+					# option name
+					(?<name>
+						[a-z_][a-z_0-9]*
+					)
+					# optional with:
+					(?:
+						# horizantal spaces
+						\h+
+						# one of:
+						(?:
+							# open multiline marker with new line
+							(?<ml>
+								<<<<\n
+							)
+							# optional content:
+							(?:
+								# multiline value
+								(?<mlv>
+									# one line inside
 									(?:
+										# optional new line from previous line
 										\n?
+										# line start
 										^
+										# no close-marker here
 										(?!
 											>>>>$
 										)
+										# line content
 										.*+
 									)*+
 								)
-								\n                  #         new line
-							)??                     #       ;  # avoid to eat more then one trailing markers
-							>>>>$                   #       close marker
-						|                           #     or
-							(?<iv>.*)               #       (simple inline value)
-						)                           #     ;
-					)?                              #   ;
-				|                                   # or
-					(?<invalid>.+)                  #   (invalid something else)
-				)?                                  # ;
-				$                                   # end of line
+								# new line before close-marker
+								\n
+							)??
+							# close marker
+							>>>>$
+						|
+							# simple inline value
+							(?<iv> .* )
+						)
+					)?
+				|
+					# invalid something else
+					(?<invalid> .+ )
+				)?
+				# end of line
+				$
 			/gmxi)
 		{
 			my ($name, $ml, $mlv, $iv, $invalid) = @+{ qw(name ml mlv iv invalid) };
