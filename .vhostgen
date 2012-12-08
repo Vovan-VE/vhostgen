@@ -855,9 +855,9 @@ sub isValidDomainLabel($$) {
 				push @domains, $$domain;
 				$config->{domain} = join('.', reverse @domains);
 
-				my @n = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
-				push @names, \@n;
-				push @namesCounts, scalar @n;
+				my @dir_aliases = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
+				push @names, \@dir_aliases;
+				push @namesCounts, scalar @dir_aliases;
 
 				if ($config->{depth} > 0) {
 					domainDir();
