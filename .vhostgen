@@ -634,7 +634,7 @@ sub init () {
 			usage();
 		}
 		elsif (-d $arg) {
-			$cwd = $arg;
+			$cwd = Cwd::abs_path($arg);
 		}
 		else {
 			usage();
