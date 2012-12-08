@@ -440,10 +440,19 @@ sub readConfig ($\%$) {
 						(?:                         #     one of:
 							(?<ml> <<<<\n )         #       (open multiline marker with new line)
 							(?:                     #       optional content:
-								(?<mlv>[\d\D]*?)    #         (multiline value)
+								(?<mlv>             #         (multiline value)
+									(?:
+										\n?
+										^
+										(?!
+											>>>>$
+										)
+										.*+
+									)*+
+								)
 								\n                  #         new line
 							)??                     #       ;  # avoid to eat more then one trailing markers
-							>>>>                    #       close marker
+							>>>>$                   #       close marker
 						|                           #     or
 							(?<iv>.*)               #       (simple inline value)
 						)                           #     ;
