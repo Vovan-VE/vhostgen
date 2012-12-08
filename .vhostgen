@@ -517,7 +517,7 @@ sub init () {
 			usage();
 		}
 		elsif (-d $v) {
-			$cwd = $v;
+			$cwd = Cwd::abs_path($v);
 		}
 		else {
 			usage();
