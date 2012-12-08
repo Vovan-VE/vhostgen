@@ -173,8 +173,9 @@ my $config = {
 	use Carp;
 
 	sub new($$) {
-		my $class = ref $_[0] || $_[0];
-		my $text = $_[1];
+		my ($self, $text) = @_;
+
+		my $class = ref($self) || $self;
 		bless \$text, $class;
 	}
 
@@ -183,7 +184,7 @@ my $config = {
 	sub isset($) { 1; }
 
 	sub get($) {
-		my $self = $_[0];
+		my ($self) = @_;
 
 		ref($self) or croak "usage: \$obj->get()";
 		my $v = $$self;
@@ -215,8 +216,9 @@ my $config = {
 	} keys %configVarName;
 
 	sub new($$) {
-		my $class = ref $_[0] || $_[0];
-		my $name = $_[1];
+		my ($self, $name) = @_;
+
+		my $class = ref($self) || $self;
 		$name = lc($name);
 		if (exists $constant{$name}) {
 			return VHostGen::Template::Text->new($constant{$name});
@@ -232,14 +234,14 @@ my $config = {
 	sub isvar($) { 1; }
 
 	sub isset($) {
-		my $self = $_[0];
+		my ($self) = @_;
 
 		ref($self) or croak "usage: \$obj->isset()";
 		defined $config->{$$self};
 	}
 
 	sub get($) {
-		my $self = $_[0];
+		my ($self) = @_;
 
 		ref($self) or croak "usage: \$obj->get()";
 		my $v = $config->{$$self};
@@ -269,41 +271,46 @@ my $config = {
 	use Carp;
 
 	sub new($\@) {
-		my $class = ref $_[0] || $_[0];
+		my ($obj, $items) = @_;
+
+		my $class = ref($obj) || $obj;
 		my $self = {
-			items => $_[1],
+			items => $items,
 			vars  => [],
 		};
-		for (@{$self->{items}}) {
-			ref($_) && $_->isa('VHostGen::Template::Item') or croak "All array items must be an instance of VHostGen::Template::Item class";
-			push @{$self->{vars}}, $_ if $_->isvar();
+		for my $item (@{$self->{items}}) {
+			ref($item) && $item->isa('VHostGen::Template::Item')
+				or croak "All array items must be an instance of VHostGen::Template::Item class";
+
+			push @{$self->{vars}}, $item
+				if $item->isvar();
 		}
-		unless (@{$self->{vars}}) {
-			return VHostGen::Template::Text->new(join '', map {$_->get()} @{$self->{items}});
-		}
+		return VHostGen::Template::Text->new(join '', map {$_->get()} @{$self->{items}})
+			unless @{$self->{vars}};
+
 		bless $self, $class;
 	}
 
 	sub isvar($) {
-		my $self = $_[0];
+		my ($self) = @_;
 
 		ref($self) or croak "usage: \$obj->isvar()";
 		scalar @{$self->{vars}};
 	}
 
 	sub isset($) {
-		my $self = $_[0];
+		my ($self) = @_;
 
 		ref($self) or croak "usage: \$obj->isset()";
 		return 1 unless @{$self->{vars}};
-		for (@{$self->{vars}}) {
-			return 1 if $_->isset();
+		for my $var (@{$self->{vars}}) {
+			return 1 if $var->isset();
 		}
 		0;
 	}
 
 	sub get($) {
-		my $self = $_[0];
+		my ($self) = @_;
 
 		ref($self) or croak "usage: \$obj->get()";
 		join '', map {$_->isset() ? $_->get() : ()} @{$self->{items}};
@@ -316,12 +323,13 @@ my $config = {
 	use base ('VHostGen::Template::Cond');
 
 	sub new($$$) {
-		my $class = ref $_[0] || $_[0];
-		my $code = $_[1];
-		my $LinesBefore = $_[2];
-		my $items = [];
-		my @itemsStack;
+		my ($self, $code, $LinesBefore) = @_;
+
+		my $class   = ref($self) || $self;
+		my $items   = [];
 		my $lastPos = 0;
+		my @itemsStack;
+
 		eval {
 			# template  :: (<text> | <var> | <cond>)*
 			# text      :: [^\[\]{}]+
@@ -345,15 +353,16 @@ my $config = {
 					}
 					# ]
 					else {
-						@itemsStack or die "Unexpected ']' without opening '['\n";
+						die "Unexpected ']' without opening '['\n"
+							unless @itemsStack;
+
 						my $C;
-						if (@$items) {
-							$C = VHostGen::Template::Cond->new($items);
-						}
+						$C = VHostGen::Template::Cond->new($items)
+							if @$items;
+
 						$items = pop @itemsStack;
-						if ($C) {
-							push @$items, $C;
-						}
+						push @$items, $C
+							if $C;
 					}
 				}
 				# variable {var}
@@ -375,14 +384,17 @@ my $config = {
 			$n = 1 + ($n =~ tr/\n/\n/);
 			die "Template error: $@ at line " . ($LinesBefore + $n) . " (inner line $n, inner offset: $lastPos)\n";
 		}
-		if (@itemsStack) {
-			die "Template error: Expected ']' " . scalar(@itemsStack) . " times to close all unclosed '[' at the end\n";
-		}
+
+		die "Template error: Expected ']' " . scalar(@itemsStack) . " times to close all unclosed '[' at the end\n"
+			if @itemsStack;
+
 		$class->SUPER::new($items);
 	}
 
 	sub newEmpty($) {
-		my $class = ref $_[0] || $_[0];
+		my ($self) = @_;
+
+		my $class = ref($self) || $self;
 		$class->SUPER::new([]);
 	}
 
@@ -474,9 +486,9 @@ sub readConfig ($\%$) {
 						if ($value ne '') {
 							$nv = [ split(/\s+/, $value) ];
 							if (($configVarName{$lcName0} & VAR_TYPE) == VAR_TYPE_TEMPLATE) {
-								for (@$nv) {
+								for my $word (@$nv) {
 									eval {
-										$_ = VHostGen::Template->new($_, $oLine);
+										$word = VHostGen::Template->new($word, $oLine);
 									};
 									if ($@) {
 										chomp $@;
@@ -653,9 +665,13 @@ sub init () {
 }
 
 sub enumDirs ($) {
+	my ($path) = @_;
+
 	return unless wantarray;
-	opendir my $dir, $_[0] or die "Unable to read the directory.\n";
-	my @dirs = grep {$_ ne '.' && $_ ne '..' && -d $_[0] . '/' . $_} readdir $dir;
+	opendir my $dir, $path
+		or die "Unable to read the directory.\n";
+
+	my @dirs = grep {$_ ne '.' && $_ ne '..' && -d $path . '/' . $_} readdir $dir;
 	closedir $dir;
 	@dirs;
 }
@@ -680,13 +696,13 @@ sub isValidDomainLabel($$) {
 		$Count *= $namesCounts[$_] for 0 .. $L1;
 		my (%bak, $n);
 		if (defined $config->{domainalias}) {
-			for (0 .. $L1) {
-				$n = 'domain' . $_;
+			for my $i (0 .. $L1) {
+				$n = 'domain' . $i;
 				$bak{$n} = $config->{$n};
 			}
 			$bak{domain} = $config->{domain};
 		}
-		for (0 .. $Count - 1) {
+		for my $total_index (0 .. $Count - 1) {
 			if (defined $config->{domainalias}) {
 				push @a, $config->{domain} = join(
 					'.',
@@ -695,10 +711,10 @@ sub isValidDomainLabel($$) {
 					} reverse 0 .. $L1
 				);
 				$n = 0;
-				for (map {$_->get()} @{$config->{domainalias}}) {
+				for my $alias ( map { $_->get() } @{$config->{domainalias}} ) {
 					$n++;
-					next if exists $d{$_};
-					$d{$_} = [$n, ++$di];
+					next if exists $d{$alias};
+					$d{$alias} = [$n, ++$di];
 				}
 			}
 			else {
@@ -710,11 +726,11 @@ sub isValidDomainLabel($$) {
 				);
 			}
 			my $c = 1;
-			for (reverse 0 .. $L1) {
-				$index[$_] += $c;
-				last if $index[$_] < $namesCounts[$_];
-				$c = int $index[$_] / $namesCounts[$_];
-				$index[$_] %= $namesCounts[$_]
+			for my $n (reverse 0 .. $L1) {
+				$index[$n] += $c;
+				last if $index[$n] < $namesCounts[$n];
+				$c = int( $index[$n] / $namesCounts[$n] );
+				$index[$n] %= $namesCounts[$n]
 			}
 		}
 
@@ -728,8 +744,8 @@ sub isValidDomainLabel($$) {
 				map { [$_, $d{$_}->[0], $d{$_}->[1]] }
 				keys %d;
 
-			for (0 .. $L1) {
-				$n = 'domain' . $_;
+			for my $i (0 .. $L1) {
+				$n = 'domain' . $i;
 				$config->{$n} = $bak{$n};
 			}
 			$config->{domain} = $bak{domain};
