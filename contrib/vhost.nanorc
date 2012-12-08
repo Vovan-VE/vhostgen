@@ -1,0 +1,28 @@
+## Конфиги утилиты генерации хостов vhostgen
+syntax "vhost" "\.vhost(\.cfg)?$"
+## комментарии: начинаются на # в начале строки, не считая пробелов
+color  brightblack     "^[[:space:]]*#.*"
+## вся строка с опцией (для подсветки однострочных значений) - имя в начале строки, не считая пробелов
+icolor cyan            "^[[:space:]]*[a-z_].*$"
+## имя несуществующей директивы - любое имя в начале строки (не считая пробелов), но существующие перекрашиваются далее
+icolor white,red       "^[[:space:]]*[a-z_][a-z_0-9]*\>"
+## boolean опции
+icolor blue            "^[[:space:]]*(skip|headersreplace)\>"
+## массив - фиолетовый
+icolor magenta         "^[[:space:]]*(diralias)\>"
+## массив - фиолетовый; шаблон - яркий/жирный
+icolor brightmagenta   "^[[:space:]]*(domainalias)\>"
+## строковые директивы
+icolor green           "^[[:space:]]*(port|depth|name|apacheconf|winhosts(ip)?)\>"
+## строковые, шаблоны
+icolor brightgreen     "^[[:space:]]*(beginfile|virtualhost|headers)\>"
+## тело многострочного блока строки
+color  cyan            start="<<<<$" end="^>>>>$"
+## границы блока строки
+color  brightyellow    "(<<<<|^>>>>)$"
+## скобки условного блока в шаблоне
+color  brightwhite     "[][]"
+## переменная в шаблоне
+color  brightblue      "\{[^{}]*\}"
+## пробельные символы в конце строки
+color  black,red       "[[:space:]]+$"

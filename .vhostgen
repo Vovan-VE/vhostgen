@@ -1,0 +1,734 @@
+#!/usr/bin/perl
+package VHostGen;
+# @todo Улучшить обработку параметров командной строки
+
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+vhostgen - Утилита автоматической генерации конфига виртуальных хостов Apache
+по существующей структуре директорий
+
+=head1 SYNOPSIS
+
+.vhostgen [<directory>]
+
+=head1 DESCRIPTION
+
+Утилита и главный конфиг F<.vhost.cfg> кладутся в директорию C<DocumentRoot>.
+Дерево вложенных папок будет просканировано и обработано согласно конфигам.
+В субдиректории по мере необходимости кладутся конфиги F<.vhost> с нужными
+директивами. Глубина анализа субдиректорий при необходимости контролируется
+конфигами. C<VirtualHost> создаётся только для самых вложенных из
+проанализированных субдиректорий.
+
+=head1 CONFIGURATION
+
+Настройка утилиты отсуществляется с помощью двух типов конфигурационных файлов:
+
+=over
+
+=item F<.vhost.cfg> - Главный конфиг
+
+Располагается в рабочей директории утилиты.
+
+=item F<.vhost> - Конфиг директории
+
+Располагается в анализируемых субдиректориях I<при необходимости>.
+
+=back
+
+Конфигурационный файл представляет собой текстовый файл с директивами.
+
+B<Комментарии> начинаются с символа C<#> в начале строки (пробельные символы
+впереди игнорируются). Комментарий может занимать только всю
+строку целиком.
+
+B<Директивы> имеют два способа указания значения:
+
+=over
+
+=item * Простое однострочное значение.
+
+=item * Многострочное значение.
+
+=back
+
+=head1 AUTHOR
+
+Copyright (С) 2009-2011 Vovan-VE <vovan-ve@yandex.ru>
+
+=cut
+
+use strict;
+use Carp;
+#use Data::Dumper;
+use Cwd ();
+
+use constant {
+	VERSION_NAME => 'VHostGen',
+	VERSION_NUMBER => '3.0.2',
+};
+use constant {
+	VERSION => VERSION_NAME . '/' . VERSION_NUMBER,
+	CONFIGURATION_FILE => '.vhost.cfg',
+	CONFIG_DIR_FILE => '.vhost',
+};
+	
+# config variables bit flags
+use constant {
+	# source: 0xF: 1,2,4,8
+	VAR_SOURCE => 0xF,
+	VAR_SOURCE_PREDEF => 0x0,
+	VAR_SOURCE_GLOBAL  => 0x1,
+	VAR_SOURCE_PERDIR  => 0x2,
+	VAR_SOURCE_DYNAMIC => 0x4,
+	
+	# scope: 0x10: inheritable (default) or local per directory
+	VAR_SCOPE => 0x10,
+	VAR_SCOPE_INHERIT => 0x00,
+	VAR_SCOPE_LOCAL   => 0x10,
+	
+	# type: 0x20: plaintext (default) or template
+	VAR_TYPE => 0x20,
+	VAR_TYPE_PLAINTEXT => 0x00,
+	VAR_TYPE_TEMPLATE  => 0x20,
+	
+	# empty: 0x40: empty value means undefined value (default) or defined empty value
+	VAR_EMPTY => 0x40,
+	VAR_EMPTY_UNDEF => 0x00,
+	VAR_EMPTY_VALUE => 0x40,
+	
+	# data: 0x80: scalar (default) or array (space separated list)
+	VAR_DATA => 0x80,
+	VAR_DATA_SCALAR => 0x00,
+	VAR_DATA_ARRAY  => 0x80,
+	
+	# tpl: 0x100: if allowed to use in template
+	VAR_TPL => 0x100,
+	VAR_TPL_DENY  => 0x000,
+	VAR_TPL_ALLOW => 0x100,
+};
+# @todo int value type
+
+# config variable names with bitwise properties
+my %configVarName = (
+	time        => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
+	cwd         => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
+	version     => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
+	
+	apacheconf  => VAR_SOURCE_GLOBAL,
+	winhosts    => VAR_SOURCE_GLOBAL,
+	winhostsip  => VAR_SOURCE_GLOBAL,
+	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW,
+	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
+	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+	
+	skip           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
+	name           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL,
+	diralias       => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_DATA_ARRAY,
+	domainalias    => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_DATA_ARRAY,
+	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE,
+	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
+	
+	path       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	dir0       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	domain     => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	domain0    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	alias      => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+);
+# @todo префикс local перед директивой для переопределения локальности наследуемых директив (local port 80 | .port 80)
+# @todo вставлять в шаблон часть массива (но в указанном порядке, да еще через такой-то разделитель). domain[1..5] , domain[5..1] , domain[1..>] , domain[<..5] , domain[5..<] , domain[>..1]
+
+my ($cwd);
+# default config values
+my $config = {
+	cwd         => undef,
+	time        => undef,
+	version     => VERSION,
+	apacheconf  => './vhosts.conf',
+	winhosts    => undef,
+	winhostsip  => '127.0.0.1',
+	port        => undef,
+	depth       => 2,
+	beginfile   => undef,
+	virtualhost => undef,
+};
+
+{ package VHostGen::Template::Item;
+	sub new($$) { }
+	sub isvar($) { }
+	sub isset($) { }
+	sub get($) { }
+	1;
+}
+
+{ package VHostGen::Template::Text;
+	use base ('VHostGen::Template::Item');
+	use Carp;
+	sub new($$) {
+		my $class = ref $_[0] || $_[0];
+		my $text = $_[1];
+		bless \$text, $class;
+	}
+	sub isvar($) { 0; }
+	sub isset($) { 1; }
+	sub get($) {
+		my $self = $_[0];
+		ref $self or croak "usage: \$obj->get()";
+		my $v = $$self;
+		defined $v ? $v : '';
+	}
+	1;
+}
+
+{ package VHostGen::Template::Var;
+	use base ('VHostGen::Template::Item');
+	use Carp;
+	our %constant = (
+		''  => '',
+		'('  => '{',
+		')'  => '}',
+		'()' => '{}',
+		'['  => '[',
+		']'  => ']',
+		'[]' => '[]',
+	);
+	our %allowed = map {
+		($configVarName{$_} & VHostGen::VAR_TPL) == VHostGen::VAR_TPL_ALLOW
+			? ($_ => 1)
+			: ();
+	} keys %configVarName;
+	sub new($$) {
+		my $class = ref $_[0] || $_[0];
+		my $name = $_[1];
+		$name = lc $name;
+		if (exists $constant{$name}) {
+			return VHostGen::Template::Text->new($constant{$name});
+		}
+		my $name0 = $name;
+		$name0 =~ s/\d+$/0/;
+		die "Unknown or disallowed variable \"$name\"\n" unless exists $allowed{$name0};
+		bless \$name, $class;
+	}
+	sub isvar($) { 1; }
+	sub isset($) {
+		my $self = $_[0];
+		ref $self or croak "usage: \$obj->isset()";
+		defined $config->{$$self};
+	}
+	sub get($) {
+		my $self = $_[0];
+		ref $self or croak "usage: \$obj->get()";
+		my $v = $config->{$$self};
+		return '' unless defined $v;
+		my $r = ref $v;
+		return $v unless $r;
+		return join(' ', map {ref($_) && $_->isa('VHostGen::Template::Item') ? $_->get() : $_} @$v) if $r eq 'ARRAY';
+		$v;
+	}
+	1;
+}
+
+{ package VHostGen::Template::Cond;
+	use base ('VHostGen::Template::Item');
+	use Carp;
+	sub new($\@) {
+		my $class = ref $_[0] || $_[0];
+		my $self = {
+			items => $_[1],
+			vars  => [],
+		};
+		for (@{$self->{items}}) {
+			ref($_) && $_->isa('VHostGen::Template::Item') or croak "All array items must be an instance of VHostGen::Template::Item class";
+			push @{$self->{vars}}, $_ if $_->isvar();
+		}
+		unless (@{$self->{vars}}) {
+			return VHostGen::Template::Text->new(join '', map {$_->get()} @{$self->{items}});
+		}
+		bless $self, $class;
+	}
+	sub isvar($) {
+		my $self = $_[0];
+		ref $self or croak "usage: \$obj->isvar()";
+		scalar @{$self->{vars}};
+	}
+	sub isset($) {
+		my $self = $_[0];
+		ref $self or croak "usage: \$obj->isset()";
+		return 1 unless @{$self->{vars}};
+		for (@{$self->{vars}}) {
+			return 1 if $_->isset();
+		}
+		0;
+	}
+	sub get($) {
+		my $self = $_[0];
+		ref $self or croak "usage: \$obj->get()";
+		join '', map {$_->isset() ? $_->get() : ()} @{$self->{items}};
+	}
+	1;
+}
+
+{ package VHostGen::Template;
+	use base ('VHostGen::Template::Cond');
+	sub new($$$) {
+		my $class = ref $_[0] || $_[0];
+		my $code = $_[1];
+		my $LinesBefore = $_[2];
+		my $items = [];
+		my @itemsStack;
+		my $lastPos = 0;
+		eval {
+			# template  :: (<text> | <var> | <cond>)*
+			# text      :: [^\[\]{}]+
+			# var       :: \{[^{}]+\}
+			# cond      :: \[<template>\]
+			
+			pos($code) = 0;
+			while ($code =~ /(?<text>[^\[\]{}]+)|\{(?<var>[^{}]*)\}|(?<cond>[\[\]])|(?<err>.)/sg)
+			{
+				$lastPos = $-[0];
+				my ($text, $var, $cond, $err) = @+{ qw(text var cond err) };
+				die "Invalid character '$err'\n" if defined $err;
+				# cond "[" or "]"
+				if (defined $cond) {
+					# [
+					if ($cond eq '[') {
+						push @itemsStack, $items;
+						$items = [];
+					}
+					# ]
+					else {
+						@itemsStack or die "Unexpected ']' without opening '['\n";
+						my $C;
+						if (@$items) {
+							$C = VHostGen::Template::Cond->new($items);
+						}
+						$items = pop @itemsStack;
+						if ($C) {
+							push @$items, $C;
+						}
+					}
+				}
+				# variable {var}
+				elsif (defined $var) {
+					die "Unable to use template variable \"$var\" directly in template\n" if exists $configVarName{$var} && ($configVarName{$var} & VHostGen::VAR_TYPE) == VHostGen::VAR_TYPE_TEMPLATE;
+					push @$items, VHostGen::Template::Var->new($var);
+				}
+				# plain text
+				else {
+					push @$items, VHostGen::Template::Text->new($text);
+				}
+			}
+		};
+		if ($@) {
+			chomp $@;
+			my $n = substr($code, 0, $lastPos);
+			$n = 1 + ($n =~ tr/\n/\n/);
+			die "Template error: $@ at line " . ($LinesBefore + $n) . " (inner line $n, inner offset: $lastPos)\n";
+		}
+		if (@itemsStack) {
+			die "Template error: Expected ']' " . scalar(@itemsStack) . " times to close all unclosed '[' at the end\n";
+		}
+		$class->SUPER::new($items);
+	}
+	sub newEmpty($) {
+		my $class = ref $_[0] || $_[0];
+		$class->SUPER::new([]);
+	}
+	sub isvar($) { 0; }
+	sub isset($) { 1; }
+	1;
+}
+
+sub readConfig ($\%$) {
+	my ($filename, $rhConfig, $source) = @_;
+	$source &= VAR_SOURCE;
+	if (-e $filename) {
+		my $data;
+		{
+			local $/;
+			open my $h, '<', $filename or die "Unable to read configuration file $filename\n";
+			$data = <$h>;
+			close $h;
+		}
+		# replace CRLF and CR with LF
+		$data =~ s/\r\n?/\n/g;
+		pos($data) = 0;
+		my $line = 1;
+		while ($data =~ /
+				^                                   # start of line
+				\h*                                 # skip leading horizontal spaces
+				(?:                                 # optional one of:
+					[#].*                           #   comment
+				|                                   # or
+					(?<name>[a-z_][a-z_0-9]*)       #   (option name)
+					(?:                             #   optional with:
+						\h+                         #     horizantal spaces
+						(?:                         #     one of:
+							(?<ml><<<<\n)           #       (open multiline marker with new line)
+							(?:                     #       optional content:
+								(?<mlv>[\d\D]*?)    #         (multiline value)
+								\n                  #         new line
+							)??                     #       ;  # avoid to eat more then one trailing markers
+							>>>>                    #       close marker
+						|                           #     or
+							(?<iv>.*)               #       (simple inline value)
+						)                           #     ;
+					)?                              #   ;
+				|                                   # or
+					(?<invalid>.+)                  #   (invalid something else)
+				)?                                  # ;
+				$                                   # end of line
+			/gmxi)
+		{
+			my ($name, $ml, $mlv, $iv, $invalid) = @+{ qw(name ml mlv iv invalid) };
+			die "Unknown character '" . substr($invalid, 0, 1) . "' at line $line\n" if defined $invalid;
+			if (defined $name) {
+				my ($lcName, $value, $oLine) = (lc $name, '', $line);
+				my $lcName0 = $lcName;
+				$lcName0 =~ s/\d+$/0/;
+				exists $configVarName{$lcName0} && ($configVarName{$lcName0} & $source)
+					or die "Unknown option '$name' at line $oLine\n";
+				if (defined $iv) {
+					# inline value
+					($value = $iv) =~ s/\h+$//;
+				}
+				elsif (defined $ml) {
+					# multiline value
+					$line++;
+					if (defined $mlv) {
+						$value = $mlv;
+						$line += 1 + ($value =~ tr/\n/\n/);
+					}
+				}
+				# no value specified: empty or undef
+				$value = undef if $value eq '' && ($configVarName{$lcName0} & VAR_EMPTY) == VAR_EMPTY_UNDEF;
+				
+				if (($configVarName{$lcName0} & VAR_DATA) == VAR_DATA_ARRAY) {
+					my $nv;
+					if (defined $value) {
+						$value =~ s/^\s+|\s+$//g;
+						if ($value ne '') {
+							$nv = [split(/\s+/, $value)];
+							if (($configVarName{$lcName0} & VAR_TYPE) == VAR_TYPE_TEMPLATE) {
+								for (@$nv) {
+									eval {
+										$_ = VHostGen::Template->new($_, $oLine);
+									};
+									if ($@) {
+										chomp $@;
+										die "Error in value of option $name on line $oLine: $@\n";
+									}
+								}
+							}
+						}
+					}
+					$value = defined $nv ? $nv : [];
+				}
+				else {
+					if (defined $value) {
+						if (($configVarName{$lcName0} & VAR_TYPE) == VAR_TYPE_TEMPLATE) {
+							eval {
+								$value = VHostGen::Template->new($value, $oLine);
+							};
+							if ($@) {
+								chomp $@;
+								die "Error in value of option $name on line $oLine: $@\n";
+							}
+						}
+					}
+				}
+				$rhConfig->{$lcName} = $value;
+			}
+			$line++;
+		}
+	}
+	for (grep {
+			($configVarName{$_} & $source) && 
+			($configVarName{$_} & VAR_DATA) == VAR_DATA_SCALAR && 
+			($configVarName{$_} & VAR_TYPE) == VAR_TYPE_TEMPLATE
+		} keys %configVarName)
+	{
+		next if defined $rhConfig->{$_};
+		$rhConfig->{$_} = VHostGen::Template->newEmpty();
+	}
+	1;
+}
+
+{ my $ApacheFH;
+	sub ApacheConfOpen () {
+		die "No value specified for ApacheConf\n" unless defined $config->{apacheconf};
+		open $ApacheFH, ">", $config->{apacheconf} or die "Unable to open ApacheConf file \"$config->{apacheconf}\"\n";
+		print $ApacheFH $config->{beginfile}->get();
+		1;
+	}
+	sub ApacheConfVHost () {
+		print $ApacheFH "\n", $config->{virtualhost}->get();
+		1;
+	}
+}
+{ my $WinHostsFH;
+	sub WinHostsOpen() {
+		return unless defined $config->{winhosts};
+		die "WinHostsIP has no value when WinHosts is specified\n" unless defined $config->{winhostsip};
+		open $WinHostsFH, ">", $config->{winhosts} or die "Unable to open WinHosts file \"$config->{winhosts}\"\n";
+		print $WinHostsFH "# This file has been generated automatically by $config->{version} at $config->{time}\n\n";
+		1;
+	}
+	sub WinHostsAdd() {
+		return unless $WinHostsFH;
+		print $WinHostsFH "$config->{winhostsip}\t\t$config->{domain}\n";
+		1;
+	}
+}
+
+sub usage() {
+	my $v = VERSION;
+	die qq($v
+Usage: vhostgen [<directory>]
+
+  <directory>
+    Base working directory. By default current working directory will be used.
+);
+
+}
+
+sub init () {
+	# autoflush on
+	$| = 1;
+	my $oldfh = select STDERR;
+	$| = 1;
+	select $oldfh;
+	
+	my $argc = scalar @ARGV;
+	if (0 == $argc) {
+		$cwd = Cwd::cwd();
+	}
+	elsif (1 == $argc) {
+		my $v = $ARGV[0];
+		if ($v eq "-h" || $v eq "-?" || $v eq "--help") {
+			usage();
+		}
+		elsif (-d $v) {
+			$cwd = $v;
+		}
+		else {
+			usage();
+		}
+	}
+	else {
+		usage();
+	}
+	
+	print VERSION, "\n";
+	
+	chdir $cwd or die "Unable to change working directory to $cwd\n";
+	print "cwd is $cwd\n";
+	
+	$config->{cwd} = $cwd;
+	$config->{cwd} =~ tr{\\}{/};
+	$config->{path} = $config->{cwd};
+	$config->{subpath} = '';
+	
+	my ($s, $i, $h, $d, $m, $y) = localtime;
+	$config->{time} = sprintf("%04d-%02d-%02d %02d:%02d:%02d", $y + 1900, $m + 1, $d, $h, $i, $s);
+	
+	for (grep {($configVarName{$_} & VAR_SOURCE) == VAR_SOURCE_PREDEF} keys %configVarName)
+	{
+		$VHostGen::Template::Var::constant{$_} = $config->{$_};
+	}
+	
+	my $cfg = './' . CONFIGURATION_FILE;
+	eval {
+		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL);
+	};
+	die "Config \"$cfg\": $@\n" if $@;
+	ApacheConfOpen();
+	WinHostsOpen();
+	print "\n";
+	1;
+}
+
+{ my @configStack;
+	sub configPush () {
+		# бекапим ссылку на исходный конфиг
+		push @configStack, $config;
+		# новая ссылка на новый пустой конфиг
+		my $copy = {};
+		# копируем поштучно
+		for (keys %$config) {
+			# кроме локальных
+			next if ($configVarName{$_} & VAR_SCOPE) == VAR_SCOPE_LOCAL;
+			$copy->{$_} = $config->{$_};
+		}
+		# подменяем ссылку
+		$config = $copy;
+		1;
+	}
+
+	sub configPop () {
+		croak "Config stack already empty" unless @configStack;
+		$config = pop @configStack;
+	}
+}
+
+sub enumDirs ($) {
+	return unless wantarray;
+	opendir my $dir, $_[0] or die "Unable to read the directory.\n";
+	my @dirs = grep {$_ ne '.' && $_ ne '..' && -d $_[0] . '/' . $_} readdir $dir;
+	closedir $dir;
+	@dirs;
+}
+
+sub isValidDomainLabel($$) {
+	my ($label, $level) = @_;
+	return $level
+		? $label =~ /^[a-z\d](?:[-a-z\d]*[a-z\d])?$/
+		: $label =~ /^[a-z](?:[-a-z\d]*[a-z\d])?$/;
+}
+
+{ my (@subpath, @domains, @names, @namesCounts);
+	my $totalVHosts = 0;
+
+	sub aliases() {
+		my $L = scalar @names;
+		my $L1 = $L - 1;
+		my @index = (0) x $L;
+		my (@a, %d);
+		my $di = 0;
+		my $Count = 1;
+		$Count *= $namesCounts[$_] for 0 .. $L1;
+		my (%bak, $n);
+		if (defined $config->{domainalias}) {
+			for (0 .. $L1) {
+				$n = 'domain' . $_;
+				$bak{$n} = $config->{$n};
+			}
+			$bak{domain} = $config->{domain};
+		}
+		for (0 .. $Count - 1) {
+			if (defined $config->{domainalias}) {
+				push @a, $config->{domain} = join '.', map { $config->{'domain' . $_} = $names[$_]->[$index[$_]] } reverse 0 .. $L1;
+				$n = 0;
+				for (map {$_->get()} @{$config->{domainalias}}) {
+					$n++;
+					next if exists $d{$_};
+					$d{$_} = [$n, ++$di];
+				}
+			}
+			else {
+				push @a, join '.', map {$names[$_]->[$index[$_]]} reverse 0 .. $L1;
+			}
+			my $c = 1;
+			for (reverse 0 .. $L1) {
+				$index[$_] += $c;
+				last if $index[$_] < $namesCounts[$_];
+				$c = int $index[$_] / $namesCounts[$_];
+				$index[$_] %= $namesCounts[$_]
+			}
+		}
+		
+		if (defined $config->{domainalias}) {
+			# убираем из %d всё, что уже есть в @a
+			delete $d{$_} for @a;
+			# добавляем %d в @a
+			push @a, map {$_->[0]} sort {$a->[1] <=> $b->[1] or $a->[2] <=> $b->[2]} map {[$_, $d{$_}->[0], $d{$_}->[1]]} keys %d;
+			
+			for (0 .. $L1) {
+				$n = 'domain' . $_;
+				$config->{$n} = $bak{$n};
+			}
+			$config->{domain} = $bak{domain};
+		}
+		
+		# первый элемент всегда будет равен domain'у, поэтому убираем его
+		shift @a;
+		
+		$config->{alias} = @a ? join(' ', @a) : undef;
+		scalar @a;
+	}
+	
+	sub vhostDir() {
+		$config->{extheaders} = $config->{headers}->isset() ? $config->{headers}->get() : undef;
+		aliases();
+		ApacheConfVHost();
+		WinHostsAdd();
+		
+		print "[+] $config->{domain}\t .$config->{subpath}\n";
+		++$totalVHosts;
+	}
+	
+	sub domainDir();
+	sub domainDir() {
+		my @dirs = enumDirs('.' . $config->{subpath});
+		# отсортировать без учета регистра. преобразование Шварца
+		@dirs = map {$_->[1]}
+				sort {$a->[0] cmp $b->[0]}
+				map {[lc($_), $_]}
+				@dirs;
+		for my $dir (@dirs) {
+			configPush();
+			push @subpath, $dir;
+			$config->{depth}--;
+			$config->{'dir' . $#subpath} = $dir;
+			$config->{subpath} = '/' . join('/', @subpath);
+			$config->{path} = $config->{cwd} . $config->{subpath};
+			my $cfg = '.' . $config->{subpath} . '/' .  CONFIG_DIR_FILE;
+			eval {
+				readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
+			};
+			warn "Config \"$cfg\" ignored: $@\n" if $@;
+			
+			TRY: {
+				last if defined $config->{skip};
+				my $domain = \( $config->{'domain' . $#subpath} = lc(defined $config->{name} ? $config->{name} : $dir) );
+				unless (isValidDomainLabel($$domain, $#subpath)) {
+					warn "Invalid domain \"$$domain\" in \".$config->{subpath}\" ignored.\n";
+					last;
+				}
+				push @domains, $$domain;
+				$config->{domain} = join '.', reverse @domains;
+				
+				my @n = ($$domain, defined $config->{diralias} ? @{$config->{diralias}} : ());
+				push @names, \@n;
+				push @namesCounts, scalar @n;
+				
+				if ($config->{depth} > 0) {
+					domainDir();
+				}
+				else {
+					vhostDir();
+				}
+				
+				pop @namesCounts;
+				pop @names;
+				pop @domains;
+			}
+			
+			pop @subpath;
+			configPop();
+		}
+		1;
+	}
+	
+	sub result() {
+		if ($totalVHosts) {
+			print "\n$totalVHosts virtual hosts created\n";
+		}
+		else {
+			print "No virtual hosts created\n";
+		}
+	}
+}
+
+init();
+domainDir();
+result();
+1;
