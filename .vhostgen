@@ -76,7 +76,7 @@ use constant {
 	CONFIGURATION_FILE => '.vhost.cfg',
 	CONFIG_DIR_FILE => '.vhost',
 };
-	
+
 # config variables bit flags
 use constant {
 	# source: 0xF: 1,2,4,8
@@ -85,27 +85,27 @@ use constant {
 	VAR_SOURCE_GLOBAL  => 0x1,
 	VAR_SOURCE_PERDIR  => 0x2,
 	VAR_SOURCE_DYNAMIC => 0x4,
-	
+
 	# scope: 0x10: inheritable (default) or local per directory
 	VAR_SCOPE => 0x10,
 	VAR_SCOPE_INHERIT => 0x00,
 	VAR_SCOPE_LOCAL   => 0x10,
-	
+
 	# type: 0x20: plaintext (default) or template
 	VAR_TYPE => 0x20,
 	VAR_TYPE_PLAINTEXT => 0x00,
 	VAR_TYPE_TEMPLATE  => 0x20,
-	
+
 	# empty: 0x40: empty value means undefined value (default) or defined empty value
 	VAR_EMPTY => 0x40,
 	VAR_EMPTY_UNDEF => 0x00,
 	VAR_EMPTY_VALUE => 0x40,
-	
+
 	# data: 0x80: scalar (default) or array (space separated list)
 	VAR_DATA => 0x80,
 	VAR_DATA_SCALAR => 0x00,
 	VAR_DATA_ARRAY  => 0x80,
-	
+
 	# tpl: 0x100: if allowed to use in template
 	VAR_TPL => 0x100,
 	VAR_TPL_DENY  => 0x000,
@@ -118,7 +118,7 @@ my %configVarName = (
 	time        => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 	cwd         => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 	version     => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
-	
+
 	apacheconf  => VAR_SOURCE_GLOBAL,
 	winhosts    => VAR_SOURCE_GLOBAL,
 	winhostsip  => VAR_SOURCE_GLOBAL,
@@ -126,14 +126,14 @@ my %configVarName = (
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
-	
+
 	skip           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
 	name           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL,
 	diralias       => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_DATA_ARRAY,
 	domainalias    => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_DATA_ARRAY,
 	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE,
 	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
-	
+
 	path       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	dir0       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
@@ -289,7 +289,7 @@ my $config = {
 			# text      :: [^\[\]{}]+
 			# var       :: \{[^{}]+\}
 			# cond      :: \[<template>\]
-			
+
 			pos($code) = 0;
 			while ($code =~ /(?<text>[^\[\]{}]+)|\{(?<var>[^{}]*)\}|(?<cond>[\[\]])|(?<err>.)/sg)
 			{
@@ -410,7 +410,7 @@ sub readConfig ($\%$) {
 				}
 				# no value specified: empty or undef
 				$value = undef if $value eq '' && ($configVarName{$lcName0} & VAR_EMPTY) == VAR_EMPTY_UNDEF;
-				
+
 				if (($configVarName{$lcName0} & VAR_DATA) == VAR_DATA_ARRAY) {
 					my $nv;
 					if (defined $value) {
@@ -451,8 +451,8 @@ sub readConfig ($\%$) {
 		}
 	}
 	for (grep {
-			($configVarName{$_} & $source) && 
-			($configVarName{$_} & VAR_DATA) == VAR_DATA_SCALAR && 
+			($configVarName{$_} & $source) &&
+			($configVarName{$_} & VAR_DATA) == VAR_DATA_SCALAR &&
 			($configVarName{$_} & VAR_TYPE) == VAR_TYPE_TEMPLATE
 		} keys %configVarName)
 	{
@@ -506,7 +506,7 @@ sub init () {
 	my $oldfh = select STDERR;
 	$| = 1;
 	select $oldfh;
-	
+
 	my $argc = scalar @ARGV;
 	if (0 == $argc) {
 		$cwd = Cwd::cwd();
@@ -526,25 +526,25 @@ sub init () {
 	else {
 		usage();
 	}
-	
+
 	print VERSION, "\n";
-	
+
 	chdir $cwd or die "Unable to change working directory to $cwd\n";
 	print "cwd is $cwd\n";
-	
+
 	$config->{cwd} = $cwd;
 	$config->{cwd} =~ tr{\\}{/};
 	$config->{path} = $config->{cwd};
 	$config->{subpath} = '';
-	
+
 	my ($s, $i, $h, $d, $m, $y) = localtime;
 	$config->{time} = sprintf("%04d-%02d-%02d %02d:%02d:%02d", $y + 1900, $m + 1, $d, $h, $i, $s);
-	
+
 	for (grep {($configVarName{$_} & VAR_SOURCE) == VAR_SOURCE_PREDEF} keys %configVarName)
 	{
 		$VHostGen::Template::Var::constant{$_} = $config->{$_};
 	}
-	
+
 	my $cfg = './' . CONFIGURATION_FILE;
 	eval {
 		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL);
@@ -634,37 +634,37 @@ sub isValidDomainLabel($$) {
 				$index[$_] %= $namesCounts[$_]
 			}
 		}
-		
+
 		if (defined $config->{domainalias}) {
 			# убираем из %d всё, что уже есть в @a
 			delete $d{$_} for @a;
 			# добавляем %d в @a
 			push @a, map {$_->[0]} sort {$a->[1] <=> $b->[1] or $a->[2] <=> $b->[2]} map {[$_, $d{$_}->[0], $d{$_}->[1]]} keys %d;
-			
+
 			for (0 .. $L1) {
 				$n = 'domain' . $_;
 				$config->{$n} = $bak{$n};
 			}
 			$config->{domain} = $bak{domain};
 		}
-		
+
 		# первый элемент всегда будет равен domain'у, поэтому убираем его
 		shift @a;
-		
+
 		$config->{alias} = @a ? join(' ', @a) : undef;
 		scalar @a;
 	}
-	
+
 	sub vhostDir() {
 		$config->{extheaders} = $config->{headers}->isset() ? $config->{headers}->get() : undef;
 		aliases();
 		ApacheConfVHost();
 		WinHostsAdd();
-		
+
 		print "[+] $config->{domain}\t .$config->{subpath}\n";
 		++$totalVHosts;
 	}
-	
+
 	sub domainDir();
 	sub domainDir() {
 		my @dirs = enumDirs('.' . $config->{subpath});
@@ -685,7 +685,7 @@ sub isValidDomainLabel($$) {
 				readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
 			};
 			warn "Config \"$cfg\" ignored: $@\n" if $@;
-			
+
 			TRY: {
 				last if defined $config->{skip};
 				my $domain = \( $config->{'domain' . $#subpath} = lc(defined $config->{name} ? $config->{name} : $dir) );
@@ -695,29 +695,29 @@ sub isValidDomainLabel($$) {
 				}
 				push @domains, $$domain;
 				$config->{domain} = join '.', reverse @domains;
-				
+
 				my @n = ($$domain, defined $config->{diralias} ? @{$config->{diralias}} : ());
 				push @names, \@n;
 				push @namesCounts, scalar @n;
-				
+
 				if ($config->{depth} > 0) {
 					domainDir();
 				}
 				else {
 					vhostDir();
 				}
-				
+
 				pop @namesCounts;
 				pop @names;
 				pop @domains;
 			}
-			
+
 			pop @subpath;
 			configPop();
 		}
 		1;
 	}
-	
+
 	sub result() {
 		if ($totalVHosts) {
 			print "\n$totalVHosts virtual hosts created\n";
