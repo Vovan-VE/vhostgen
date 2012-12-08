@@ -68,20 +68,20 @@ use Carp;
 use Cwd ();
 
 use constant {
-	VERSION_NAME => 'VHostGen',
+	VERSION_NAME   => 'VHostGen',
 	VERSION_NUMBER => '3.0.2',
 };
 use constant {
-	VERSION => VERSION_NAME . '/' . VERSION_NUMBER,
+	VERSION            => VERSION_NAME . '/' . VERSION_NUMBER,
 	CONFIGURATION_FILE => '.vhost.cfg',
-	CONFIG_DIR_FILE => '.vhost',
+	CONFIG_DIR_FILE    => '.vhost',
 };
 
 # config variables bit flags
 use constant {
 	# source: 0xF: 1,2,4,8
 	VAR_SOURCE => 0xF,
-	VAR_SOURCE_PREDEF => 0x0,
+	VAR_SOURCE_PREDEF  => 0x0,
 	VAR_SOURCE_GLOBAL  => 0x1,
 	VAR_SOURCE_PERDIR  => 0x2,
 	VAR_SOURCE_DYNAMIC => 0x4,
@@ -171,27 +171,34 @@ my $config = {
 { package VHostGen::Template::Text;
 	use base ('VHostGen::Template::Item');
 	use Carp;
+
 	sub new($$) {
 		my $class = ref $_[0] || $_[0];
 		my $text = $_[1];
 		bless \$text, $class;
 	}
+
 	sub isvar($) { 0; }
+
 	sub isset($) { 1; }
+
 	sub get($) {
 		my $self = $_[0];
-		ref $self or croak "usage: \$obj->get()";
+
+		ref($self) or croak "usage: \$obj->get()";
 		my $v = $$self;
-		defined $v ? $v : '';
+		(defined $v) ? $v : '';
 	}
+
 	1;
 }
 
 { package VHostGen::Template::Var;
 	use base ('VHostGen::Template::Item');
 	use Carp;
+
 	our %constant = (
-		''  => '',
+		''   => '',
 		'('  => '{',
 		')'  => '}',
 		'()' => '{}',
@@ -199,45 +206,68 @@ my $config = {
 		']'  => ']',
 		'[]' => '[]',
 	);
+
 	our %allowed = map {
 		($configVarName{$_} & VHostGen::VAR_TPL) == VHostGen::VAR_TPL_ALLOW
 			? ($_ => 1)
-			: ();
+			: ()
+		;
 	} keys %configVarName;
+
 	sub new($$) {
 		my $class = ref $_[0] || $_[0];
 		my $name = $_[1];
-		$name = lc $name;
+		$name = lc($name);
 		if (exists $constant{$name}) {
 			return VHostGen::Template::Text->new($constant{$name});
 		}
 		my $name0 = $name;
 		$name0 =~ s/\d+$/0/;
-		die "Unknown or disallowed variable \"$name\"\n" unless exists $allowed{$name0};
+		die "Unknown or disallowed variable \"$name\"\n"
+			unless exists $allowed{$name0};
+
 		bless \$name, $class;
 	}
+
 	sub isvar($) { 1; }
+
 	sub isset($) {
 		my $self = $_[0];
-		ref $self or croak "usage: \$obj->isset()";
+
+		ref($self) or croak "usage: \$obj->isset()";
 		defined $config->{$$self};
 	}
+
 	sub get($) {
 		my $self = $_[0];
-		ref $self or croak "usage: \$obj->get()";
+
+		ref($self) or croak "usage: \$obj->get()";
 		my $v = $config->{$$self};
 		return '' unless defined $v;
+
 		my $r = ref $v;
 		return $v unless $r;
-		return join(' ', map {ref($_) && $_->isa('VHostGen::Template::Item') ? $_->get() : $_} @$v) if $r eq 'ARRAY';
+
+		return join(
+			' ',
+			map {
+				( ref($_) && $_->isa('VHostGen::Template::Item') )
+					? $_->get()
+					: $_
+			} @$v
+		)
+			if $r eq 'ARRAY';
+
 		$v;
 	}
+
 	1;
 }
 
 { package VHostGen::Template::Cond;
 	use base ('VHostGen::Template::Item');
 	use Carp;
+
 	sub new($\@) {
 		my $class = ref $_[0] || $_[0];
 		my $self = {
@@ -253,30 +283,38 @@ my $config = {
 		}
 		bless $self, $class;
 	}
+
 	sub isvar($) {
 		my $self = $_[0];
-		ref $self or croak "usage: \$obj->isvar()";
+
+		ref($self) or croak "usage: \$obj->isvar()";
 		scalar @{$self->{vars}};
 	}
+
 	sub isset($) {
 		my $self = $_[0];
-		ref $self or croak "usage: \$obj->isset()";
+
+		ref($self) or croak "usage: \$obj->isset()";
 		return 1 unless @{$self->{vars}};
 		for (@{$self->{vars}}) {
 			return 1 if $_->isset();
 		}
 		0;
 	}
+
 	sub get($) {
 		my $self = $_[0];
-		ref $self or croak "usage: \$obj->get()";
+
+		ref($self) or croak "usage: \$obj->get()";
 		join '', map {$_->isset() ? $_->get() : ()} @{$self->{items}};
 	}
+
 	1;
 }
 
 { package VHostGen::Template;
 	use base ('VHostGen::Template::Cond');
+
 	sub new($$$) {
 		my $class = ref $_[0] || $_[0];
 		my $code = $_[1];
@@ -295,7 +333,9 @@ my $config = {
 			{
 				$lastPos = $-[0];
 				my ($text, $var, $cond, $err) = @+{ qw(text var cond err) };
-				die "Invalid character '$err'\n" if defined $err;
+				die "Invalid character '$err'\n"
+					if defined $err;
+
 				# cond "[" or "]"
 				if (defined $cond) {
 					# [
@@ -318,7 +358,9 @@ my $config = {
 				}
 				# variable {var}
 				elsif (defined $var) {
-					die "Unable to use template variable \"$var\" directly in template\n" if exists $configVarName{$var} && ($configVarName{$var} & VHostGen::VAR_TYPE) == VHostGen::VAR_TYPE_TEMPLATE;
+					die "Unable to use template variable \"$var\" directly in template\n"
+						if exists $configVarName{$var} && ($configVarName{$var} & VHostGen::VAR_TYPE) == VHostGen::VAR_TYPE_TEMPLATE;
+
 					push @$items, VHostGen::Template::Var->new($var);
 				}
 				# plain text
@@ -338,28 +380,38 @@ my $config = {
 		}
 		$class->SUPER::new($items);
 	}
+
 	sub newEmpty($) {
 		my $class = ref $_[0] || $_[0];
 		$class->SUPER::new([]);
 	}
+
 	sub isvar($) { 0; }
+
 	sub isset($) { 1; }
+
 	1;
 }
 
+
 sub readConfig ($\%$) {
 	my ($filename, $rhConfig, $source) = @_;
+
 	$source &= VAR_SOURCE;
+
 	if (-e $filename) {
 		my $data;
 		{
 			local $/;
-			open my $h, '<', $filename or die "Unable to read configuration file $filename\n";
+			open my $h, '<', $filename
+				or die "Unable to read configuration file $filename\n";
+
 			$data = <$h>;
 			close $h;
 		}
 		# replace CRLF and CR with LF
 		$data =~ s/\r\n?/\n/g;
+
 		pos($data) = 0;
 		my $line = 1;
 		while ($data =~ /
@@ -389,13 +441,16 @@ sub readConfig ($\%$) {
 			/gmxi)
 		{
 			my ($name, $ml, $mlv, $iv, $invalid) = @+{ qw(name ml mlv iv invalid) };
-			die "Unknown character '" . substr($invalid, 0, 1) . "' at line $line\n" if defined $invalid;
+			die "Unknown character '" . substr($invalid, 0, 1) . "' at line $line\n"
+				if defined $invalid;
+
 			if (defined $name) {
 				my ($lcName, $value, $oLine) = (lc $name, '', $line);
 				my $lcName0 = $lcName;
 				$lcName0 =~ s/\d+$/0/;
 				exists $configVarName{$lcName0} && ($configVarName{$lcName0} & $source)
 					or die "Unknown option '$name' at line $oLine\n";
+
 				if (defined $iv) {
 					# inline value
 					($value = $iv) =~ s/\h+$//;
@@ -409,14 +464,15 @@ sub readConfig ($\%$) {
 					}
 				}
 				# no value specified: empty or undef
-				$value = undef if $value eq '' && ($configVarName{$lcName0} & VAR_EMPTY) == VAR_EMPTY_UNDEF;
+				$value = undef
+					if $value eq '' && ($configVarName{$lcName0} & VAR_EMPTY) == VAR_EMPTY_UNDEF;
 
 				if (($configVarName{$lcName0} & VAR_DATA) == VAR_DATA_ARRAY) {
 					my $nv;
 					if (defined $value) {
 						$value =~ s/^\s+|\s+$//g;
 						if ($value ne '') {
-							$nv = [split(/\s+/, $value)];
+							$nv = [ split(/\s+/, $value) ];
 							if (($configVarName{$lcName0} & VAR_TYPE) == VAR_TYPE_TEMPLATE) {
 								for (@$nv) {
 									eval {
@@ -430,7 +486,7 @@ sub readConfig ($\%$) {
 							}
 						}
 					}
-					$value = defined $nv ? $nv : [];
+					$value = (defined $nv) ? $nv : [];
 				}
 				else {
 					if (defined $value) {
@@ -450,6 +506,7 @@ sub readConfig ($\%$) {
 			$line++;
 		}
 	}
+
 	for (grep {
 			($configVarName{$_} & $source) &&
 			($configVarName{$_} & VAR_DATA) == VAR_DATA_SCALAR &&
@@ -459,29 +516,41 @@ sub readConfig ($\%$) {
 		next if defined $rhConfig->{$_};
 		$rhConfig->{$_} = VHostGen::Template->newEmpty();
 	}
+
 	1;
 }
 
 { my $ApacheFH;
 	sub ApacheConfOpen () {
-		die "No value specified for ApacheConf\n" unless defined $config->{apacheconf};
-		open $ApacheFH, ">", $config->{apacheconf} or die "Unable to open ApacheConf file \"$config->{apacheconf}\"\n";
+		die "No value specified for ApacheConf\n"
+			unless defined $config->{apacheconf};
+
+		open $ApacheFH, ">", $config->{apacheconf}
+			or die "Unable to open ApacheConf file \"$config->{apacheconf}\"\n";
+
 		print $ApacheFH $config->{beginfile}->get();
 		1;
 	}
+
 	sub ApacheConfVHost () {
 		print $ApacheFH "\n", $config->{virtualhost}->get();
 		1;
 	}
 }
+
 { my $WinHostsFH;
 	sub WinHostsOpen() {
 		return unless defined $config->{winhosts};
-		die "WinHostsIP has no value when WinHosts is specified\n" unless defined $config->{winhostsip};
-		open $WinHostsFH, ">", $config->{winhosts} or die "Unable to open WinHosts file \"$config->{winhosts}\"\n";
+		die "WinHostsIP has no value when WinHosts is specified\n"
+			unless defined $config->{winhostsip};
+
+		open $WinHostsFH, ">", $config->{winhosts}
+			or die "Unable to open WinHosts file \"$config->{winhosts}\"\n";
+
 		print $WinHostsFH "# This file has been generated automatically by $config->{version} at $config->{time}\n\n";
 		1;
 	}
+
 	sub WinHostsAdd() {
 		return unless $WinHostsFH;
 		print $WinHostsFH "$config->{winhostsip}\t\t$config->{domain}\n";
@@ -549,7 +618,9 @@ sub init () {
 	eval {
 		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL);
 	};
-	die "Config \"$cfg\": $@\n" if $@;
+	die "Config \"$cfg\": $@\n"
+		if $@;
+
 	ApacheConfOpen();
 	WinHostsOpen();
 	print "\n";
@@ -574,7 +645,9 @@ sub init () {
 	}
 
 	sub configPop () {
-		croak "Config stack already empty" unless @configStack;
+		croak "Config stack already empty"
+			unless @configStack;
+
 		$config = pop @configStack;
 	}
 }
@@ -615,7 +688,12 @@ sub isValidDomainLabel($$) {
 		}
 		for (0 .. $Count - 1) {
 			if (defined $config->{domainalias}) {
-				push @a, $config->{domain} = join '.', map { $config->{'domain' . $_} = $names[$_]->[$index[$_]] } reverse 0 .. $L1;
+				push @a, $config->{domain} = join(
+					'.',
+					map {
+						$config->{'domain' . $_} = $names[$_]->[$index[$_]]
+					} reverse 0 .. $L1
+				);
 				$n = 0;
 				for (map {$_->get()} @{$config->{domainalias}}) {
 					$n++;
@@ -624,7 +702,12 @@ sub isValidDomainLabel($$) {
 				}
 			}
 			else {
-				push @a, join '.', map {$names[$_]->[$index[$_]]} reverse 0 .. $L1;
+				push @a, join(
+					'.',
+					map {
+						$names[$_]->[$index[$_]]
+					} reverse 0 .. $L1
+				);
 			}
 			my $c = 1;
 			for (reverse 0 .. $L1) {
@@ -638,8 +721,12 @@ sub isValidDomainLabel($$) {
 		if (defined $config->{domainalias}) {
 			# убираем из %d всё, что уже есть в @a
 			delete $d{$_} for @a;
+
 			# добавляем %d в @a
-			push @a, map {$_->[0]} sort {$a->[1] <=> $b->[1] or $a->[2] <=> $b->[2]} map {[$_, $d{$_}->[0], $d{$_}->[1]]} keys %d;
+			push @a, map { $_->[0] }
+				sort { $a->[1] <=> $b->[1] or $a->[2] <=> $b->[2] }
+				map { [$_, $d{$_}->[0], $d{$_}->[1]] }
+				keys %d;
 
 			for (0 .. $L1) {
 				$n = 'domain' . $_;
@@ -651,12 +738,15 @@ sub isValidDomainLabel($$) {
 		# первый элемент всегда будет равен domain'у, поэтому убираем его
 		shift @a;
 
-		$config->{alias} = @a ? join(' ', @a) : undef;
+		$config->{alias} = (@a) ? join(' ', @a) : undef;
 		scalar @a;
 	}
 
 	sub vhostDir() {
-		$config->{extheaders} = $config->{headers}->isset() ? $config->{headers}->get() : undef;
+		$config->{extheaders} = ( $config->{headers}->isset() )
+			? $config->{headers}->get()
+			: undef
+		;
 		aliases();
 		ApacheConfVHost();
 		WinHostsAdd();
@@ -669,9 +759,9 @@ sub isValidDomainLabel($$) {
 	sub domainDir() {
 		my @dirs = enumDirs('.' . $config->{subpath});
 		# отсортировать без учета регистра. преобразование Шварца
-		@dirs = map {$_->[1]}
-				sort {$a->[0] cmp $b->[0]}
-				map {[lc($_), $_]}
+		@dirs = map  { $_->[1] }
+				sort { $a->[0] cmp $b->[0] }
+				map  { [lc($_), $_] }
 				@dirs;
 		for my $dir (@dirs) {
 			configPush();
@@ -679,16 +769,23 @@ sub isValidDomainLabel($$) {
 			$config->{depth}--;
 			$config->{'dir' . $#subpath} = $dir;
 			$config->{subpath} = '/' . join('/', @subpath);
-			$config->{path} = $config->{cwd} . $config->{subpath};
+			$config->{path}    = $config->{cwd} . $config->{subpath};
 			my $cfg = '.' . $config->{subpath} . '/' .  CONFIG_DIR_FILE;
 			eval {
 				readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
 			};
-			warn "Config \"$cfg\" ignored: $@\n" if $@;
+			warn "Config \"$cfg\" ignored: $@\n"
+				if $@;
 
 			TRY: {
 				last if defined $config->{skip};
-				my $domain = \( $config->{'domain' . $#subpath} = lc(defined $config->{name} ? $config->{name} : $dir) );
+				my $domain = \(
+					$config->{'domain' . $#subpath} = lc(
+						(defined $config->{name})
+							? $config->{name}
+							: $dir
+					)
+				);
 				unless (isValidDomainLabel($$domain, $#subpath)) {
 					warn "Invalid domain \"$$domain\" in \".$config->{subpath}\" ignored.\n";
 					last;
@@ -696,7 +793,7 @@ sub isValidDomainLabel($$) {
 				push @domains, $$domain;
 				$config->{domain} = join '.', reverse @domains;
 
-				my @n = ($$domain, defined $config->{diralias} ? @{$config->{diralias}} : ());
+				my @n = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
 				push @names, \@n;
 				push @namesCounts, scalar @n;
 
