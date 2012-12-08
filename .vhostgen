@@ -69,7 +69,7 @@ use Cwd ();
 
 use constant {
 	VERSION_NAME => 'VHostGen',
-	VERSION_NUMBER => '3.0.2',
+	VERSION_NUMBER => '3.0.3',
 };
 use constant {
 	VERSION => VERSION_NAME . '/' . VERSION_NUMBER,
@@ -517,7 +517,7 @@ sub init () {
 			usage();
 		}
 		elsif (-d $v) {
-			$cwd = $v;
+			$cwd = Cwd::abs_path($v);
 		}
 		else {
 			usage();
