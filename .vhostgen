@@ -411,9 +411,10 @@ my $config = {
 }
 
 
-sub readConfig ($\%$) {
-	my ($filename, $rhConfig, $source) = @_;
+sub loadConfig($$) {
+	my ($filename, $source) = @_;
 
+	my $rhConfig = {};
 	$source &= VAR_SOURCE;
 
 	if (-e $filename) {
@@ -556,7 +557,21 @@ sub readConfig ($\%$) {
 			}
 			$line++;
 		}
+
+		return $rhConfig;
 	}
+	else {
+		return;
+	}
+}
+
+sub applyConfig(\%\%$) {
+	my ($target, $data, $source) = @_;
+
+	$source &= VAR_SOURCE;
+
+	$target->{$_} = $data->{$_}
+		for keys $data;
 
 	for (grep {
 			($configVarName{$_} & $source)
@@ -564,9 +579,18 @@ sub readConfig ($\%$) {
 			&& VAR_TYPE_TEMPLATE == ($configVarName{$_} & VAR_TYPE)
 		} keys %configVarName)
 	{
-		next if defined $rhConfig->{$_};
-		$rhConfig->{$_} = VHostGen::Template->newEmpty();
+		next if defined $target->{$_};
+		$target->{$_} = VHostGen::Template->newEmpty();
 	}
+
+	1;
+}
+
+sub readConfig ($\%$) {
+	my ($filename, $rhConfig, $source) = @_;
+
+	my $read_config = loadConfig($filename, $source) || {};
+	applyConfig(%$rhConfig, %$read_config, $source);
 
 	1;
 }
