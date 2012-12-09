@@ -951,7 +951,7 @@ sub isValidDomainLabel($$) {
 			unless (defined $config->{skip}) {
 				if (-l $path) {
 					defined $config->{name}
-						or $config->{name} = File::basename( $config->{path} );
+						or $config->{name} = File::Basename::basename( $config->{path} );
 
 					$config->{diralias} = [
 						(defined $config->{diralias})
