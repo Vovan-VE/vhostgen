@@ -1,6 +1,5 @@
 #!/usr/bin/perl
 package VHostGen;
-# @todo Улучшить обработку параметров командной строки
 
 =pod
 
@@ -128,7 +127,6 @@ use constant {
 	#VAR_MERGE_FROM_NOT_EMPTY => 0x0800, # it is defined and not empty
 	#VAR_MERGE_FROM_DEFINED   => 0x1000, # it is defined
 };
-# @todo int value type
 
 # config variable names with bitwise properties
 my %configVarName = (
@@ -162,8 +160,6 @@ my %configVarName = (
 	alias      => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 );
-# @todo префикс local перед директивой для переопределения локальности наследуемых директив (local port 80 | .port 80)
-# @todo вставлять в шаблон часть массива (но в указанном порядке, да еще через такой-то разделитель). domain[1..5] , domain[5..1] , domain[1..>] , domain[<..5] , domain[5..<] , domain[>..1]
 
 my ($cwd);
 # default config values
