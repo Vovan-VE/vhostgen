@@ -243,10 +243,9 @@ my $config = {
 		return VHostGen::Template::Text->new($constant{$name})
 			if exists $constant{$name};
 
-		my $name0 = $name;
-		$name0 =~ s/\d+$/0/;
+		(my $name_zero = $name) =~ s/\d+$/0/;
 		die "Unknown or disallowed variable \"$name\"\n"
-			unless exists $allowed{$name0};
+			unless exists $allowed{$name_zero};
 
 		bless \$name, $class;
 	}
@@ -517,8 +516,7 @@ my $config = {
 
 				if (defined $name) {
 					my ($name_lower, $value, $start_line) = (lc $name, '', $line);
-					my $name_lower_zero = $name_lower;
-					$name_lower_zero =~ s/\d+$/0/;
+					(my $name_lower_zero = $name_lower) =~ s/\d+$/0/;
 					exists $configVarName{$name_lower_zero}
 						or die "Unknown option '$name' at line $start_line\n";
 
@@ -815,7 +813,11 @@ sub enumDirs ($) {
 	opendir my $dir, $path
 		or die "Unable to read the directory.\n";
 
-	my @dirs = grep { $_ ne '.' && $_ ne '..' && -d $path . '/' . $_ } readdir $dir;
+	my @dirs = grep {
+		$_ ne '.'
+		&& $_ ne '..'
+		&& -d $path . '/' . $_
+	} readdir $dir;
 	closedir $dir;
 	@dirs;
 }
