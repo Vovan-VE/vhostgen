@@ -617,9 +617,10 @@ sub applyConfig(\%\%$) {
 sub readConfig ($\%$) {
 	my ($filename, $config, $source) = @_;
 
-	my $read_config = getConfig($filename) || {};
-	applyConfig(%$config, %$read_config, $source);
+	my $read_config = getConfig($filename);
+	applyConfig(%$config, %{ $read_config || {} }, $source);
 
+	return unless $read_config;
 	1;
 }
 
@@ -770,9 +771,10 @@ sub init () {
 
 	my $cfg = './' . CONFIGURATION_FILE;
 	eval {
-		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL);
+		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL)
+			or die "File not found\n";
 	};
-	die "Config \"$cfg\": $@\n"
+	die "Config \"$cfg\": $@"
 		if $@;
 
 	ApacheConfOpen();
