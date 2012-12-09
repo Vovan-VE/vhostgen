@@ -111,6 +111,22 @@ use constant {
 	VAR_TPL => 0x100,
 	VAR_TPL_DENY  => 0x000,
 	VAR_TPL_ALLOW => 0x100,
+
+	# merge dir config:
+	VAR_MERGE => 0x1E00,
+	# merge dir config: merge to me if:
+	VAR_MERGE_TO => 0x600,
+	VAR_MERGE_TO_NEVER  => 0x000, # never (default)
+	VAR_MERGE_TO_UNDEF  => 0x200, # I'm not defined
+	VAR_MERGE_TO_EMPTY  => 0x400, # I'm not defined or empty
+	VAR_MERGE_TO_ALWAYS => 0x600, # always
+
+	# merge dir config: merge from them only if:
+	VAR_MERGE_FROM => 0x1800,
+	# reserved two bits
+	#VAR_MERGE_FROM_ALWAYS    => 0x0000, # always (default)
+	#VAR_MERGE_FROM_NOT_EMPTY => 0x0800, # it is defined and not empty
+	#VAR_MERGE_FROM_DEFINED   => 0x1000, # it is defined
 };
 # @todo int value type
 
@@ -123,7 +139,7 @@ my %configVarName = (
 	apacheconf  => VAR_SOURCE_GLOBAL,
 	winhosts    => VAR_SOURCE_GLOBAL,
 	winhostsip  => VAR_SOURCE_GLOBAL,
-	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW,
+	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
@@ -132,19 +148,19 @@ my %configVarName = (
 	name           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL,
 	diralias       => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_DATA_ARRAY,
 	domainalias    => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_DATA_ARRAY,
-	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE,
-	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
+	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
+	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
 
 	dirs       => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
-	aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
+	aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY | VAR_MERGE_TO_ALWAYS,
 
 	path       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	dir0       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	domain     => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	domain0    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	alias      => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 );
 # @todo префикс local перед директивой для переопределения локальности наследуемых директив (local port 80 | .port 80)
 # @todo вставлять в шаблон часть массива (но в указанном порядке, да еще через такой-то разделитель). domain[1..5] , domain[5..1] , domain[1..>] , domain[<..5] , domain[5..<] , domain[>..1]
@@ -609,6 +625,55 @@ sub readConfig ($\%$) {
 	1;
 }
 
+sub mergeDirConfig(\%\%) {
+	my ($target, $add) = @_;
+
+	for my $name (keys $add) {
+		(my $name_zero = $name) =~ s/\d+$/0/;
+		my $desc = $configVarName{$name_zero};
+
+		my $merge_to = ($desc & VAR_MERGE_TO);
+		if (VAR_MERGE_TO_NEVER == $merge_to) {
+			next;
+		}
+		elsif (VAR_MERGE_TO_UNDEF == $merge_to) {
+			next if defined $target->{$name};
+		}
+		elsif (VAR_MERGE_TO_EMPTY == $merge_to) {
+			next if defined $target->{$name} and '' ne $target->{$name};
+		}
+		elsif (VAR_MERGE_TO_ALWAYS == $merge_to) {
+			# true
+		}
+		# else: no another values
+
+		# TODO Reserved VAR_MERGE_FROM
+
+		if (VAR_DATA_ARRAY == ($desc & VAR_DATA)) {
+			if (defined $add->{$name}) {
+				$target->{$name} = [
+					(defined $target->{$name})
+						? @{ $target->{$name} }
+						: ()
+					,
+					@{ $add->{$name} }
+				];
+			}
+		}
+		else {
+			$target->{$name} = (defined $add->{$name})
+				? $add->{$name}
+				: undef
+			;
+
+			$target->{$name} = ''
+				if !defined $target->{$name} && VAR_EMPTY_VALUE == ($desc & VAR_EMPTY);
+		}
+	}
+
+	1;
+}
+
 { my $ApacheFH;
 	sub ApacheConfOpen () {
 		die "No value specified for ApacheConf\n"
@@ -841,8 +906,13 @@ sub isValidDomainLabel($$) {
 
 	sub vhostDir() {
 		my $path = $config->{path};
-		$hosts{$path} = $config;
-		push @host_index, $path;
+		if (exists $hosts{$path}) {
+			mergeDirConfig( %{ $hosts{$path} }, %$config );
+		}
+		else {
+			$hosts{$path} = $config;
+			push @host_index, $path;
+		}
 	}
 
 	sub domainDir();
