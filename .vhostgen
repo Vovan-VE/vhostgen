@@ -870,8 +870,7 @@ sub isValidDomainLabel($$) {
 			warn "Config \"$cfg\" ignored: $@\n"
 				if $@;
 
-			TRY: {
-				last if defined $config->{skip};
+			unless (defined $config->{skip}) {
 				my $domain = \(
 					$config->{'domain' . $level} = lc(
 						(defined $config->{name})
