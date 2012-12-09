@@ -66,6 +66,7 @@ use strict;
 use Carp;
 #use Data::Dumper;
 use Cwd ();
+use File::Basename ();
 
 use constant {
 	VERSION_NAME   => 'VHostGen',
@@ -110,6 +111,22 @@ use constant {
 	VAR_TPL => 0x100,
 	VAR_TPL_DENY  => 0x000,
 	VAR_TPL_ALLOW => 0x100,
+
+	# merge dir config:
+	VAR_MERGE => 0x1E00,
+	# merge dir config: merge to me if:
+	VAR_MERGE_TO => 0x600,
+	VAR_MERGE_TO_NEVER  => 0x000, # never (default)
+	VAR_MERGE_TO_UNDEF  => 0x200, # I'm not defined
+	VAR_MERGE_TO_EMPTY  => 0x400, # I'm not defined or empty
+	VAR_MERGE_TO_ALWAYS => 0x600, # always
+
+	# merge dir config: merge from them only if:
+	VAR_MERGE_FROM => 0x1800,
+	# reserved two bits
+	#VAR_MERGE_FROM_ALWAYS    => 0x0000, # always (default)
+	#VAR_MERGE_FROM_NOT_EMPTY => 0x0800, # it is defined and not empty
+	#VAR_MERGE_FROM_DEFINED   => 0x1000, # it is defined
 };
 # @todo int value type
 
@@ -122,7 +139,7 @@ my %configVarName = (
 	apacheconf  => VAR_SOURCE_GLOBAL,
 	winhosts    => VAR_SOURCE_GLOBAL,
 	winhostsip  => VAR_SOURCE_GLOBAL,
-	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW,
+	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
@@ -131,19 +148,19 @@ my %configVarName = (
 	name           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL,
 	diralias       => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_DATA_ARRAY,
 	domainalias    => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_DATA_ARRAY,
-	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE,
-	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
+	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
+	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
 
 	dirs       => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
-	aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
+	aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY | VAR_MERGE_TO_ALWAYS,
 
 	path       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	dir0       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	domain     => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	domain0    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	alias      => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 );
 # @todo префикс local перед директивой для переопределения локальности наследуемых директив (local port 80 | .port 80)
 # @todo вставлять в шаблон часть массива (но в указанном порядке, да еще через такой-то разделитель). domain[1..5] , domain[5..1] , domain[1..>] , domain[<..5] , domain[5..<] , domain[>..1]
@@ -226,10 +243,9 @@ my $config = {
 		return VHostGen::Template::Text->new($constant{$name})
 			if exists $constant{$name};
 
-		my $name0 = $name;
-		$name0 =~ s/\d+$/0/;
+		(my $name_zero = $name) =~ s/\d+$/0/;
 		die "Unknown or disallowed variable \"$name\"\n"
-			unless exists $allowed{$name0};
+			unless exists $allowed{$name_zero};
 
 		bless \$name, $class;
 	}
@@ -410,6 +426,10 @@ my $config = {
 	1;
 }
 
+sub uniq(@) {
+	my %seen;
+	grep { ! $seen{$_}++ } @_;
+}
 
 { my (%loaded_configs);
 	sub loadConfig($) {
@@ -500,8 +520,7 @@ my $config = {
 
 				if (defined $name) {
 					my ($name_lower, $value, $start_line) = (lc $name, '', $line);
-					my $name_lower_zero = $name_lower;
-					$name_lower_zero =~ s/\d+$/0/;
+					(my $name_lower_zero = $name_lower) =~ s/\d+$/0/;
 					exists $configVarName{$name_lower_zero}
 						or die "Unknown option '$name' at line $start_line\n";
 
@@ -604,6 +623,55 @@ sub readConfig ($\%$) {
 
 	my $read_config = getConfig($filename) || {};
 	applyConfig(%$config, %$read_config, $source);
+
+	1;
+}
+
+sub mergeDirConfig(\%\%) {
+	my ($target, $add) = @_;
+
+	for my $name (keys $add) {
+		(my $name_zero = $name) =~ s/\d+$/0/;
+		my $desc = $configVarName{$name_zero};
+
+		my $merge_to = ($desc & VAR_MERGE_TO);
+		if (VAR_MERGE_TO_NEVER == $merge_to) {
+			next;
+		}
+		elsif (VAR_MERGE_TO_UNDEF == $merge_to) {
+			next if defined $target->{$name};
+		}
+		elsif (VAR_MERGE_TO_EMPTY == $merge_to) {
+			next if defined $target->{$name} and '' ne $target->{$name};
+		}
+		elsif (VAR_MERGE_TO_ALWAYS == $merge_to) {
+			# true
+		}
+		# else: no another values
+
+		# TODO Reserved VAR_MERGE_FROM
+
+		if (VAR_DATA_ARRAY == ($desc & VAR_DATA)) {
+			if (defined $add->{$name}) {
+				$target->{$name} = [
+					(defined $target->{$name})
+						? @{ $target->{$name} }
+						: ()
+					,
+					@{ $add->{$name} }
+				];
+			}
+		}
+		else {
+			$target->{$name} = (defined $add->{$name})
+				? $add->{$name}
+				: undef
+			;
+
+			$target->{$name} = ''
+				if !defined $target->{$name} && VAR_EMPTY_VALUE == ($desc & VAR_EMPTY);
+		}
+	}
 
 	1;
 }
@@ -749,7 +817,11 @@ sub enumDirs ($) {
 	opendir my $dir, $path
 		or die "Unable to read the directory.\n";
 
-	my @dirs = grep { $_ ne '.' && $_ ne '..' && -d $path . '/' . $_ } readdir $dir;
+	my @dirs = grep {
+		$_ ne '.'
+		&& $_ ne '..'
+		&& -d $path . '/' . $_
+	} readdir $dir;
 	closedir $dir;
 	@dirs;
 }
@@ -840,8 +912,13 @@ sub isValidDomainLabel($$) {
 
 	sub vhostDir() {
 		my $path = $config->{path};
-		$hosts{$path} = $config;
-		push @host_index, $path;
+		if (exists $hosts{$path}) {
+			mergeDirConfig( %{ $hosts{$path} }, %$config );
+		}
+		else {
+			$hosts{$path} = $config;
+			push @host_index, $path;
+		}
 	}
 
 	sub domainDir();
@@ -861,7 +938,8 @@ sub isValidDomainLabel($$) {
 			$config->{'dir' . $level} = $dir;
 			$config->{dirs} = [ @subpath ];
 			$config->{subpath} = '/' . join('/', @subpath);
-			$config->{path}    = Cwd::abs_path( $config->{cwd} . $config->{subpath} );
+			my $path = $config->{cwd} . $config->{subpath};
+			$config->{path}    = Cwd::abs_path($path);
 
 			my $cfg = $config->{path} . '/' .  CONFIG_DIR_FILE;
 			eval {
@@ -871,6 +949,19 @@ sub isValidDomainLabel($$) {
 				if $@;
 
 			unless (defined $config->{skip}) {
+				if (-l $path) {
+					defined $config->{name}
+						or $config->{name} = File::Basename::basename( $config->{path} );
+
+					$config->{diralias} = [
+						(defined $config->{diralias})
+							? @{$config->{diralias}}
+							: ()
+						,
+						$config->{dirs}->[$level],
+					];
+				}
+
 				my $domain = \(
 					$config->{'domain' . $level} = lc(
 						(defined $config->{name})
@@ -917,7 +1008,7 @@ sub isValidDomainLabel($$) {
 				: undef
 			;
 
-			my @aliases = @{ $config->{aliases} };
+			my @aliases = uniq( @{ $config->{aliases} } );
 			# first item will be the main domain name
 			# exclude it from aliases
 			$config->{domain} = shift @aliases;
