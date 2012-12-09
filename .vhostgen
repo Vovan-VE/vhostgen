@@ -411,11 +411,10 @@ my $config = {
 }
 
 
-sub loadConfig($$) {
-	my ($filename, $source) = @_;
+sub loadConfig($) {
+	my ($filename) = @_;
 
 	my $config = {};
-	$source &= VAR_SOURCE;
 
 	if (-e $filename) {
 		my $data;
@@ -502,7 +501,7 @@ sub loadConfig($$) {
 				my ($name_lower, $value, $start_line) = (lc $name, '', $line);
 				my $name_lower_zero = $name_lower;
 				$name_lower_zero =~ s/\d+$/0/;
-				exists $configVarName{$name_lower_zero} && ($configVarName{$name_lower_zero} & $source)
+				exists $configVarName{$name_lower_zero}
 					or die "Unknown option '$name' at line $start_line\n";
 
 				if (defined $inline_value) {
@@ -572,8 +571,12 @@ sub applyConfig(\%\%$) {
 
 	$source &= VAR_SOURCE;
 
-	$target->{$_} = $data->{$_}
-		for keys $data;
+	for my $name (keys $data) {
+		($configVarName{$name} & $source)
+			or die "Option '$name' is not allowed in this file\n";
+
+		$target->{$name} = $data->{$name};
+	}
 
 	$target->{$_} = VHostGen::Template->newEmpty()
 		for grep {
@@ -589,7 +592,7 @@ sub applyConfig(\%\%$) {
 sub readConfig ($\%$) {
 	my ($filename, $config, $source) = @_;
 
-	my $read_config = loadConfig($filename, $source) || {};
+	my $read_config = loadConfig($filename) || {};
 	applyConfig(%$config, %$read_config, $source);
 
 	1;
