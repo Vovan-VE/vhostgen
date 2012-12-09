@@ -66,6 +66,7 @@ use strict;
 use Carp;
 #use Data::Dumper;
 use Cwd ();
+use File::Basename ();
 
 use constant {
 	VERSION_NAME   => 'VHostGen',
@@ -861,7 +862,8 @@ sub isValidDomainLabel($$) {
 			$config->{'dir' . $level} = $dir;
 			$config->{dirs} = [ @subpath ];
 			$config->{subpath} = '/' . join('/', @subpath);
-			$config->{path}    = Cwd::abs_path( $config->{cwd} . $config->{subpath} );
+			my $path = $config->{cwd} . $config->{subpath};
+			$config->{path}    = Cwd::abs_path($path);
 
 			my $cfg = $config->{path} . '/' .  CONFIG_DIR_FILE;
 			eval {
@@ -871,6 +873,19 @@ sub isValidDomainLabel($$) {
 				if $@;
 
 			unless (defined $config->{skip}) {
+				if (-l $path) {
+					defined $config->{name}
+						or $config->{name} = File::basename( $config->{path} );
+
+					$config->{diralias} = [
+						(defined $config->{diralias})
+							? @{$config->{diralias}}
+							: ()
+						,
+						$config->{dirs}->[$level],
+					];
+				}
+
 				my $domain = \(
 					$config->{'domain' . $level} = lc(
 						(defined $config->{name})
