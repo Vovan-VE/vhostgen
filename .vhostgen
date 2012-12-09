@@ -426,6 +426,10 @@ my $config = {
 	1;
 }
 
+sub uniq(@) {
+	my %seen;
+	grep { ! $seen{$_}++ } @_;
+}
 
 { my (%loaded_configs);
 	sub loadConfig($) {
@@ -1004,7 +1008,7 @@ sub isValidDomainLabel($$) {
 				: undef
 			;
 
-			my @aliases = @{ $config->{aliases} };
+			my @aliases = uniq( @{ $config->{aliases} } );
 			# first item will be the main domain name
 			# exclude it from aliases
 			$config->{domain} = shift @aliases;
