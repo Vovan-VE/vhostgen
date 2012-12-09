@@ -414,7 +414,7 @@ my $config = {
 sub loadConfig($$) {
 	my ($filename, $source) = @_;
 
-	my $rhConfig = {};
+	my $config = {};
 	$source &= VAR_SOURCE;
 
 	if (-e $filename) {
@@ -492,73 +492,75 @@ sub loadConfig($$) {
 				$
 			/gmxi)
 		{
-			my ($name, $ml, $mlv, $iv, $invalid) = @+{ qw(name ml mlv iv invalid) };
+			my ($name, $multiline, $multiline_value, $inline_value, $invalid) =
+				@+{ qw(name ml mlv iv invalid) };
+
 			die "Unknown character '" . substr($invalid, 0, 1) . "' at line $line\n"
 				if defined $invalid;
 
 			if (defined $name) {
-				my ($lcName, $value, $oLine) = (lc $name, '', $line);
-				my $lcName0 = $lcName;
-				$lcName0 =~ s/\d+$/0/;
-				exists $configVarName{$lcName0} && ($configVarName{$lcName0} & $source)
-					or die "Unknown option '$name' at line $oLine\n";
+				my ($name_lower, $value, $start_line) = (lc $name, '', $line);
+				my $name_lower_zero = $name_lower;
+				$name_lower_zero =~ s/\d+$/0/;
+				exists $configVarName{$name_lower_zero} && ($configVarName{$name_lower_zero} & $source)
+					or die "Unknown option '$name' at line $start_line\n";
 
-				if (defined $iv) {
+				if (defined $inline_value) {
 					# inline value
-					($value = $iv) =~ s/\h+$//;
+					($value = $inline_value) =~ s/\h+$//;
 				}
-				elsif (defined $ml) {
+				elsif (defined $multiline) {
 					# multiline value
 					$line++;
-					if (defined $mlv) {
-						$value = $mlv;
+					if (defined $multiline_value) {
+						$value = $multiline_value;
 						$line += 1 + ($value =~ tr/\n/\n/);
 					}
 				}
 				# no value specified: empty or undef
-				$value = undef
-					if $value eq '' && VAR_EMPTY_UNDEF == ($configVarName{$lcName0} & VAR_EMPTY);
+				( $value eq '' && VAR_EMPTY_UNDEF == ($configVarName{$name_lower_zero} & VAR_EMPTY) )
+					and $value = undef;
 
-				if (VAR_DATA_ARRAY == ($configVarName{$lcName0} & VAR_DATA)) {
-					my $nv;
+				if (VAR_DATA_ARRAY == ($configVarName{$name_lower_zero} & VAR_DATA)) {
+					my $new_value;
 					if (defined $value) {
 						$value =~ s/^\s+|\s+$//g;
 						if ($value ne '') {
-							$nv = [ split(/\s+/, $value) ];
-							if (VAR_TYPE_TEMPLATE == ($configVarName{$lcName0} & VAR_TYPE)) {
-								for my $word (@$nv) {
+							$new_value = [ split(/\s+/, $value) ];
+							if (VAR_TYPE_TEMPLATE == ($configVarName{$name_lower_zero} & VAR_TYPE)) {
+								for my $word (@$new_value) {
 									eval {
-										$word = VHostGen::Template->new($word, $oLine);
+										$word = VHostGen::Template->new($word, $start_line);
 									};
 									if ($@) {
 										chomp $@;
-										die "Error in value of option $name on line $oLine: $@\n";
+										die "Error in value of option $name on line $start_line: $@\n";
 									}
 								}
 							}
 						}
 					}
-					$value = (defined $nv) ? $nv : [];
+					$value = $new_value || [];
 				}
 				else {
 					if (defined $value) {
-						if (VAR_TYPE_TEMPLATE == ($configVarName{$lcName0} & VAR_TYPE)) {
+						if (VAR_TYPE_TEMPLATE == ($configVarName{$name_lower_zero} & VAR_TYPE)) {
 							eval {
-								$value = VHostGen::Template->new($value, $oLine);
+								$value = VHostGen::Template->new($value, $start_line);
 							};
 							if ($@) {
 								chomp $@;
-								die "Error in value of option $name on line $oLine: $@\n";
+								die "Error in value of option $name on line $start_line: $@\n";
 							}
 						}
 					}
 				}
-				$rhConfig->{$lcName} = $value;
+				$config->{$name_lower} = $value;
 			}
 			$line++;
 		}
 
-		return $rhConfig;
+		return $config;
 	}
 	else {
 		return;
@@ -573,24 +575,22 @@ sub applyConfig(\%\%$) {
 	$target->{$_} = $data->{$_}
 		for keys $data;
 
-	for (grep {
+	$target->{$_} = VHostGen::Template->newEmpty()
+		for grep {
 			($configVarName{$_} & $source)
 			&& VAR_DATA_SCALAR   == ($configVarName{$_} & VAR_DATA)
 			&& VAR_TYPE_TEMPLATE == ($configVarName{$_} & VAR_TYPE)
-		} keys %configVarName)
-	{
-		next if defined $target->{$_};
-		$target->{$_} = VHostGen::Template->newEmpty();
-	}
+			&& ! defined $target->{$_}
+		} keys %configVarName;
 
 	1;
 }
 
 sub readConfig ($\%$) {
-	my ($filename, $rhConfig, $source) = @_;
+	my ($filename, $config, $source) = @_;
 
 	my $read_config = loadConfig($filename, $source) || {};
-	applyConfig(%$rhConfig, %$read_config, $source);
+	applyConfig(%$config, %$read_config, $source);
 
 	1;
 }
