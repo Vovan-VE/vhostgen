@@ -748,7 +748,7 @@ my $config = {
 	);
 
 	our %allowed = map {
-		($configVarName{$_} & VHostGen::VAR_TPL) == VHostGen::VAR_TPL_ALLOW
+		(VHostGen::VAR_TPL_ALLOW == ($configVarName{$_} & VHostGen::VAR_TPL))
 			? ($_ => 1)
 			: ()
 		;
@@ -823,7 +823,7 @@ my $config = {
 			push @{$self->{vars}}, $item
 				if $item->isvar();
 		}
-		return VHostGen::Template::Text->new(join '', map {$_->get()} @{$self->{items}})
+		return VHostGen::Template::Text->new(join( '', map {$_->get()} @{$self->{items}} ))
 			unless @{$self->{vars}};
 
 		bless $self, $class;
@@ -833,7 +833,11 @@ my $config = {
 		my ($self) = @_;
 
 		ref($self) or croak "usage: \$obj->isvar()";
-		scalar @{$self->{vars}};
+
+		# константно, если нет динамических элементов
+		return unless @{$self->{vars}};
+
+		1;
 	}
 
 	sub isset($) {
@@ -844,7 +848,9 @@ my $config = {
 		for my $var (@{$self->{vars}}) {
 			return 1 if $var->isset();
 		}
-		0;
+
+		# все динамические неопределены, значит и сам не определен
+		return;
 	}
 
 	sub get($) {
@@ -894,8 +900,7 @@ my $config = {
 						die "Unexpected ']' without opening '['\n"
 							unless @itemsStack;
 
-						my $cond_item;
-						$cond_item = VHostGen::Template::Cond->new($items)
+						my $cond_item = VHostGen::Template::Cond->new($items)
 							if @$items;
 
 						$items = pop @itemsStack;
@@ -905,11 +910,6 @@ my $config = {
 				}
 				# variable {var}
 				elsif (defined $var) {
-					die "Unable to use template variable \"$var\" directly in template\n"
-						if exists $configVarName{$var}
-							&& VHostGen::VAR_TYPE_TEMPLATE == ($configVarName{$var} & VHostGen::VAR_TYPE)
-					;
-
 					push @$items, VHostGen::Template::Var->new($var);
 				}
 				# plain text
@@ -1287,10 +1287,11 @@ sub init () {
 		$config->{time} = sprintf("%04d-%02d-%02d %02d:%02d:%02d", $y + 1900, $m + 1, $d, $h, $i, $s);
 	}
 
-	for (grep { VAR_SOURCE_PREDEF == ($configVarName{$_} & VAR_SOURCE) } keys %configVarName)
-	{
-		$VHostGen::Template::Var::constant{$_} = $config->{$_};
-	}
+	$VHostGen::Template::Var::constant{$_} = $config->{$_}
+		for grep {
+			VAR_SOURCE_PREDEF == ($configVarName{$_} & VAR_SOURCE)
+		} keys %configVarName
+	;
 
 	my $cfg = './' . CONFIGURATION_FILE;
 	eval {
