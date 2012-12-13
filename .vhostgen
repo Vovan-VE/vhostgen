@@ -1687,7 +1687,6 @@ sub isValidDomainLabel($$) {
 				}
 				else {
 					warn "Invalid domain \"$$domain\" in \"$config->{path}\" ignored.\n";
-					next;
 				}
 			}
 
