@@ -1491,27 +1491,29 @@ sub isValidDomainLabel($$) {
 							: $config->{dirs}->[$level]
 					)
 				);
-				unless (isValidDomainLabel($$domain, $level)) {
-					warn "Invalid domain \"$$domain\" in \"$config->{path}\" ignored.\n";
-					last;
-				}
-				push @domains, $$domain;
+				if (isValidDomainLabel($$domain, $level)) {
+					push @domains, $$domain;
 
-				my @dir_aliases = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
-				push @names, \@dir_aliases;
-				push @namesCounts, scalar @dir_aliases;
+					my @dir_aliases = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
+					push @names, \@dir_aliases;
+					push @namesCounts, scalar @dir_aliases;
 
-				if ($config->{depth} > 0) {
-					domainDir();
+					if ($config->{depth} > 0) {
+						domainDir();
+					}
+					else {
+						aliases();
+						vhostDir();
+					}
+
+					pop @namesCounts;
+					pop @names;
+					pop @domains;
 				}
 				else {
-					aliases();
-					vhostDir();
+					warn "Invalid domain \"$$domain\" in \"$config->{path}\" ignored.\n";
+					next;
 				}
-
-				pop @namesCounts;
-				pop @names;
-				pop @domains;
 			}
 
 			pop @subpath;
