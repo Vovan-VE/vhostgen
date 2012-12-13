@@ -738,7 +738,7 @@ my $config = {
 	sub get($) {
 		my ($self) = @_;
 
-		ref($self) or croak "usage: \$obj->get()";
+		ref($self) or croak 'usage: $obj->get()';
 		my $v = $$self;
 		(defined $v) ? $v : '';
 	}
@@ -782,7 +782,7 @@ my $config = {
 			if exists $constant{$name};
 
 		(my $name_zero = $name) =~ s/\d+$/0/;
-		die "Unknown or disallowed variable \"$name\"\n"
+		die qq[Unknown or disallowed variable "$name"\n]
 			unless exists $allowed{$name_zero};
 
 		bless \$name, $class;
@@ -795,14 +795,14 @@ my $config = {
 	sub isset($) {
 		my ($self) = @_;
 
-		ref($self) or croak "usage: \$obj->isset()";
+		ref($self) or croak 'usage: $obj->isset()';
 		defined $config->{$$self};
 	}
 
 	sub get($) {
 		my ($self) = @_;
 
-		ref($self) or croak "usage: \$obj->get()";
+		ref($self) or croak 'usage: $obj->get()';
 		my $value = $config->{$$self};
 		# если не определено, то пустое значение
 		return '' unless defined $value;
@@ -864,7 +864,7 @@ my $config = {
 	sub isvar($) {
 		my ($self) = @_;
 
-		ref($self) or croak "usage: \$obj->isvar()";
+		ref($self) or croak 'usage: $obj->isvar()';
 
 		# константно, если нет динамических элементов
 		return unless @{$self->{vars}};
@@ -876,7 +876,7 @@ my $config = {
 	sub isset($) {
 		my ($self) = @_;
 
-		ref($self) or croak "usage: \$obj->isset()";
+		ref($self) or croak 'usage: $obj->isset()';
 
 		# определено, если нет динамических элементов
 		return 1 unless @{$self->{vars}};
@@ -893,7 +893,7 @@ my $config = {
 	sub get($) {
 		my ($self) = @_;
 
-		ref($self) or croak "usage: \$obj->get()";
+		ref($self) or croak 'usage: $obj->get()';
 		join( '', map { $_->isset() ? $_->get() : () } @{$self->{items}} );
 	}
 
@@ -1319,7 +1319,7 @@ sub mergeDirConfig(\%\%) {
 			unless defined $config->{apacheconf};
 
 		open $ApacheFH, ">", $config->{apacheconf}
-			or die "Unable to open ApacheConf file \"$config->{apacheconf}\"\n";
+			or die qq[Unable to open ApacheConf file "$config->{apacheconf}"\n];
 
 		print $ApacheFH $config->{beginfile}->get();
 		1;
@@ -1341,7 +1341,7 @@ sub mergeDirConfig(\%\%) {
 			unless defined $config->{winhostsip};
 
 		open $WinHostsFH, ">", $config->{winhosts}
-			or die "Unable to open WinHosts file \"$config->{winhosts}\"\n";
+			or die qq[Unable to open WinHosts file "$config->{winhosts}"\n];
 
 		print $WinHostsFH "# This file has been generated automatically by $config->{version} at $config->{time}\n\n";
 		1;
@@ -1435,7 +1435,7 @@ sub init () {
 		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL)
 			or die "File not found\n";
 	};
-	die "Config \"$cfg\": $@"
+	die qq[Config "$cfg": $@]
 		if $@;
 
 	# открываем выходные файлы
@@ -1636,7 +1636,7 @@ sub isValidDomainLabel($$) {
 			eval {
 				readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
 			};
-			warn "Config \"$cfg\" ignored: $@\n"
+			warn qq[Config "$cfg" ignored: $@\n]
 				if $@;
 
 			unless (defined $config->{skip}) {
@@ -1686,7 +1686,7 @@ sub isValidDomainLabel($$) {
 					pop @domains;
 				}
 				else {
-					warn "Invalid domain \"$$domain\" in \"$config->{path}\" ignored.\n";
+					warn qq[Invalid domain "$$domain" ignored. Found in "$path".\n];
 				}
 			}
 
