@@ -16,6 +16,8 @@ B<.vhostgen> [I<< <directory> >>]
 
 B<.vhostgen> { B<-h> | B<-?> | B<--help> }
 
+B<.vhostgen --man>
+
 =head1 DESCRIPTION
 
 Утилита B<vhostgen> предназначена для генерации конфигурационного файла
@@ -1358,11 +1360,31 @@ sub mergeDirConfig(\%\%) {
 }
 
 # использование программы
-# TODO выводить man, сгенерированный из POD.
 sub usage() {
 	use Pod::Usage;
 
 	pod2usage();
+}
+
+# подробный man программы
+sub usage_man() {
+	use Pod::Man;
+
+	my $parser = Pod::Man->new(
+		utf8    => 1,
+		center  => VERSION_NAME . " Manual",
+		release => VERSION_NUMBER,
+	);
+	if ( open(my $man, "|man -l -") ) {
+		$parser->parse_from_file(__FILE__, $man);
+		close $man;
+		exit;
+	}
+	else {
+		warn "Can't create a pipe to man tool\n";
+		warn "Try to execute:  pod2man --utf8 '$0' | man -l -\n";
+		exit 1;
+	}
 }
 
 # инициализация при запуске
@@ -1385,6 +1407,10 @@ sub init () {
 		# хелп?
 		if ($arg eq "-h" || $arg eq "-?" || $arg eq "--help") {
 			usage();
+		}
+		# man?
+		elsif ($arg eq "--man") {
+			usage_man();
 		}
 		# путь к директории
 		elsif (-d $arg) {
