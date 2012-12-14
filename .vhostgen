@@ -4,6 +4,8 @@ package VHostGen;
 use strict;
 use Carp;
 #use Data::Dumper;
+use Pod::Usage;
+use Getopt::Long;
 use Cwd ();
 use File::Basename ();
 
@@ -772,13 +774,6 @@ sub mergeDirConfig(\%\%) {
 	}
 }
 
-# использование программы
-sub usage() {
-	use Pod::Usage;
-
-	pod2usage();
-}
-
 # подробный man программы
 sub usage_man() {
 	use Pod::Man;
@@ -808,34 +803,32 @@ sub init () {
 	$| = 1;
 	select $oldfh;
 
-	# разбор аргументов
-	my $argc = scalar @ARGV;
-	# без аргументов - текущая директория
-	if (0 == $argc) {
-		$cwd = Cwd::cwd();
+	Getopt::Long::Configure("bundling");
+	my (%opt);
+	GetOptions(\%opt,
+		"help|h|?",
+		"man",
+		"directory|d=s",
+	)
+		or pod2usage(2);
+
+	pod2usage(1)
+		if defined $opt{help};
+
+	usage_man()
+		if defined $opt{man};
+
+	$opt{directory} = $ARGV[0]
+		if @ARGV && ! defined $opt{directory};
+
+	if (defined $opt{directory}) {
+		-d $opt{directory}
+			or pod2usage(2);
+
+		$cwd = Cwd::abs_path( $opt{directory} );
 	}
-	# 1 аргумент
-	elsif (1 == $argc) {
-		my $arg = $ARGV[0];
-		# хелп?
-		if ($arg eq "-h" || $arg eq "-?" || $arg eq "--help") {
-			usage();
-		}
-		# man?
-		elsif ($arg eq "--man") {
-			usage_man();
-		}
-		# путь к директории
-		elsif (-d $arg) {
-			$cwd = Cwd::abs_path($arg);
-		}
-		else {
-			usage();
-		}
-	}
-	# больше аргументов - не распарсил
 	else {
-		usage();
+		$cwd = Cwd::cwd();
 	}
 
 	print VERSION, "\n";
@@ -1183,9 +1176,9 @@ vhostgen - Утилита генерации конфигов виртуальн
 
 =head1 SYNOPSIS
 
-B<.vhostgen> [I<< <directory> >>]
+B<.vhostgen> [I<options>] [I<directory>]
 
-B<.vhostgen> { B<-h> | B<-?> | B<--help> }
+B<.vhostgen> (B<-h> | B<-?> | B<--help>)
 
 B<.vhostgen --man>
 
@@ -1209,9 +1202,17 @@ B<vhostgen> сканирует стартовую директорию реку�
 
 =over
 
-=item I<< <directory> >>
+=item B<-d> I<directory>, B<--directory> I<directory>
 
 Стартовая директория. Если не указана, то по умолчанию используется текущая работая директория.
+
+=item B<-h>, B<-?>, B<--help>
+
+Выводит краткую справку об использовании программы.
+
+=item B<--man>
+
+Выводит подробную документацию программы.
 
 =back
 
