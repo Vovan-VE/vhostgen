@@ -823,7 +823,11 @@ sub init () {
 
 	if (defined $opt{directory}) {
 		-d $opt{directory}
-			or pod2usage(2);
+			or pod2usage({
+				-exitval => 2,
+				-message => qq[Directory not found: "$opt{directory}"],
+			})
+		;
 
 		$cwd = Cwd::abs_path( $opt{directory} );
 	}
