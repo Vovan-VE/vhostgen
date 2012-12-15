@@ -1,152 +1,114 @@
 #!/usr/bin/perl
 package VHostGen;
-# @todo Улучшить обработку параметров командной строки
-
-=pod
-
-=encoding utf8
-
-=head1 NAME
-
-vhostgen - Утилита автоматической генерации конфига виртуальных хостов Apache
-по существующей структуре директорий
-
-=head1 SYNOPSIS
-
-.vhostgen [<directory>]
-
-=head1 DESCRIPTION
-
-Утилита и главный конфиг F<.vhost.cfg> кладутся в директорию C<DocumentRoot>.
-Дерево вложенных папок будет просканировано и обработано согласно конфигам.
-В субдиректории по мере необходимости кладутся конфиги F<.vhost> с нужными
-директивами. Глубина анализа субдиректорий при необходимости контролируется
-конфигами. C<VirtualHost> создаётся только для самых вложенных из
-проанализированных субдиректорий.
-
-=head1 CONFIGURATION
-
-Настройка утилиты отсуществляется с помощью двух типов конфигурационных файлов:
-
-=over
-
-=item F<.vhost.cfg> - Главный конфиг
-
-Располагается в рабочей директории утилиты.
-
-=item F<.vhost> - Конфиг директории
-
-Располагается в анализируемых субдиректориях I<при необходимости>.
-
-=back
-
-Конфигурационный файл представляет собой текстовый файл с директивами.
-
-B<Комментарии> начинаются с символа C<#> в начале строки (пробельные символы
-впереди игнорируются). Комментарий может занимать только всю
-строку целиком.
-
-B<Директивы> имеют два способа указания значения:
-
-=over
-
-=item * Простое однострочное значение.
-
-=item * Многострочное значение.
-
-=back
-
-=head1 AUTHOR
-
-Copyright (С) 2009-2011 Vovan-VE <vovan-ve@yandex.ru>
-
-=cut
 
 use strict;
 use Carp;
 #use Data::Dumper;
+use Pod::Usage;
+use Getopt::Long;
 use Cwd ();
+use File::Basename ();
 
+# имя программы и номер версии
 use constant {
-	VERSION_NAME => 'VHostGen',
-	VERSION_NUMBER => '3.0.3',
+	VERSION_NAME   => 'VHostGen',
+	VERSION_NUMBER => '3.1.0',
 };
+# полная подпись версии
+# имена конфиг-файлов
 use constant {
-	VERSION => VERSION_NAME . '/' . VERSION_NUMBER,
+	VERSION            => VERSION_NAME . '/' . VERSION_NUMBER,
 	CONFIGURATION_FILE => '.vhost.cfg',
-	CONFIG_DIR_FILE => '.vhost',
+	CONFIG_DIR_FILE    => '.vhost',
 };
-	
-# config variables bit flags
-use constant {
-	# source: 0xF: 1,2,4,8
-	VAR_SOURCE => 0xF,
-	VAR_SOURCE_PREDEF => 0x0,
-	VAR_SOURCE_GLOBAL  => 0x1,
-	VAR_SOURCE_PERDIR  => 0x2,
-	VAR_SOURCE_DYNAMIC => 0x4,
-	
-	# scope: 0x10: inheritable (default) or local per directory
-	VAR_SCOPE => 0x10,
-	VAR_SCOPE_INHERIT => 0x00,
-	VAR_SCOPE_LOCAL   => 0x10,
-	
-	# type: 0x20: plaintext (default) or template
-	VAR_TYPE => 0x20,
-	VAR_TYPE_PLAINTEXT => 0x00,
-	VAR_TYPE_TEMPLATE  => 0x20,
-	
-	# empty: 0x40: empty value means undefined value (default) or defined empty value
-	VAR_EMPTY => 0x40,
-	VAR_EMPTY_UNDEF => 0x00,
-	VAR_EMPTY_VALUE => 0x40,
-	
-	# data: 0x80: scalar (default) or array (space separated list)
-	VAR_DATA => 0x80,
-	VAR_DATA_SCALAR => 0x00,
-	VAR_DATA_ARRAY  => 0x80,
-	
-	# tpl: 0x100: if allowed to use in template
-	VAR_TPL => 0x100,
-	VAR_TPL_DENY  => 0x000,
-	VAR_TPL_ALLOW => 0x100,
-};
-# @todo int value type
 
-# config variable names with bitwise properties
+# битовые маски для описания переменных конфига
+use constant {
+	# источник переменной: флаги: 1, 2, 4, 8
+	VAR_SOURCE => 0xF,
+	VAR_SOURCE_PREDEF  => 0x0, # предопределенная
+	VAR_SOURCE_GLOBAL  => 0x1, # главный конфиг стартовой директории
+	VAR_SOURCE_PERDIR  => 0x2, # конфиг дочерних директорий
+	VAR_SOURCE_DYNAMIC => 0x4, # динамически генерируется
+
+	# область видимости: флаг
+	VAR_SCOPE => 0x10,
+	VAR_SCOPE_INHERIT => 0x00, # наследуется (по умолчанию)
+	VAR_SCOPE_LOCAL   => 0x10, # локальна в директории
+
+	# тип данных: флаг
+	VAR_TYPE => 0x20,
+	VAR_TYPE_PLAINTEXT => 0x00, # простой текст (по умолчанию)
+	VAR_TYPE_TEMPLATE  => 0x20, # шаблон
+
+	# смысл пустого значения: флаг
+	VAR_EMPTY => 0x40,
+	VAR_EMPTY_UNDEF => 0x00, # неопределенное значение UNDEF (по умолчанию)
+	VAR_EMPTY_VALUE => 0x40, # определенное пустое значение
+
+	# скаляр или массив: флаг
+	VAR_DATA => 0x80,
+	VAR_DATA_SCALAR => 0x00, # скаляр (по умолчанию)
+	VAR_DATA_ARRAY  => 0x80, # список значений, разделенных пробелами
+
+	# использование в шаблонах: флаг
+	VAR_TPL => 0x100,
+	VAR_TPL_DENY  => 0x000, # запрещено (по умолчнию)
+	VAR_TPL_ALLOW => 0x100, # разрешено
+
+	# обработка слияния конфигов одинакового приоритета: маска
+	VAR_MERGE => 0x1E00,
+	# слияние конфигов: поведение текущего конфига: перечисление
+	VAR_MERGE_TO => 0x600,
+	VAR_MERGE_TO_NEVER  => 0x000, # никогда не обновлять (по умолчанию)
+	VAR_MERGE_TO_UNDEF  => 0x200, # обновлять, если я не определено
+	VAR_MERGE_TO_EMPTY  => 0x400, # обновлять, если я не определено или пустое
+	VAR_MERGE_TO_ALWAYS => 0x600, # всегда обновлять
+
+	# слияние конфигов: обновлять из вливаемого конфига: перечисление
+	VAR_MERGE_FROM => 0x1800,
+	# зарезервировано
+	#VAR_MERGE_FROM_ALWAYS    => 0x0000, # всегда (по умолчанию)
+	#VAR_MERGE_FROM_NOT_EMPTY => 0x0800, # если оно определено и непустое
+	#VAR_MERGE_FROM_DEFINED   => 0x1000, # если оно определено (допускается пустое)
+};
+
+# переменные конфига со своиси свойствами
 my %configVarName = (
 	time        => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 	cwd         => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 	version     => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
-	
+
 	apacheconf  => VAR_SOURCE_GLOBAL,
 	winhosts    => VAR_SOURCE_GLOBAL,
 	winhostsip  => VAR_SOURCE_GLOBAL,
-	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW,
+	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
-	
+
 	skip           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
 	name           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL,
 	diralias       => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_DATA_ARRAY,
 	domainalias    => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_DATA_ARRAY,
-	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE,
-	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
-	
+	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
+	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
+
+	dirs       => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
+	aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY | VAR_MERGE_TO_ALWAYS,
+
 	path       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	dir0       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	domain     => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	domain0    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	alias      => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 );
-# @todo префикс local перед директивой для переопределения локальности наследуемых директив (local port 80 | .port 80)
-# @todo вставлять в шаблон часть массива (но в указанном порядке, да еще через такой-то разделитель). domain[1..5] , domain[5..1] , domain[1..>] , domain[<..5] , domain[5..<] , domain[>..1]
 
+# стартовая рабочая директория
 my ($cwd);
-# default config values
+# сам конфиг со значениями по умолчанию
 my $config = {
 	cwd         => undef,
 	time        => undef,
@@ -160,38 +122,57 @@ my $config = {
 	virtualhost => undef,
 };
 
+# родительский класс элемента шаблона
 { package VHostGen::Template::Item;
+	# конструктор
 	sub new($$) { }
+	# проверка: является ни переменной величиной
 	sub isvar($) { }
+	# проверка: определено ли
 	sub isset($) { }
+	# получение значения
 	sub get($) { }
 	1;
 }
 
+# константная текстовая часть шаблона
 { package VHostGen::Template::Text;
 	use base ('VHostGen::Template::Item');
 	use Carp;
+
+	# $text - строка с текстом, который обозначает элемент
 	sub new($$) {
-		my $class = ref $_[0] || $_[0];
-		my $text = $_[1];
+		my ($self, $text) = @_;
+
+		my $class = ref($self) || $self;
 		bless \$text, $class;
 	}
+
+	# всегда константно
 	sub isvar($) { 0; }
+
+	# всегда определено
 	sub isset($) { 1; }
+
 	sub get($) {
-		my $self = $_[0];
-		ref $self or croak "usage: \$obj->get()";
+		my ($self) = @_;
+
+		ref($self) or croak 'usage: $obj->get()';
 		my $v = $$self;
-		defined $v ? $v : '';
+		(defined $v) ? $v : '';
 	}
+
 	1;
 }
 
+# подстановка переменной в шаблон
 { package VHostGen::Template::Var;
 	use base ('VHostGen::Template::Item');
 	use Carp;
+
+	# предопределенные константные наборы символов
 	our %constant = (
-		''  => '',
+		''   => '',
 		'('  => '{',
 		')'  => '}',
 		'()' => '{}',
@@ -199,289 +180,593 @@ my $config = {
 		']'  => ']',
 		'[]' => '[]',
 	);
+
+	# имена переменных (в ключах), разрешенных к использованию в шаблонах
 	our %allowed = map {
-		($configVarName{$_} & VHostGen::VAR_TPL) == VHostGen::VAR_TPL_ALLOW
+		(VHostGen::VAR_TPL_ALLOW == ($configVarName{$_} & VHostGen::VAR_TPL))
 			? ($_ => 1)
-			: ();
+			: ()
+		;
 	} keys %configVarName;
+
+	# $name - имя содставляемой переменной или предопределенный набор символов
 	sub new($$) {
-		my $class = ref $_[0] || $_[0];
-		my $name = $_[1];
-		$name = lc $name;
-		if (exists $constant{$name}) {
-			return VHostGen::Template::Text->new($constant{$name});
-		}
-		my $name0 = $name;
-		$name0 =~ s/\d+$/0/;
-		die "Unknown or disallowed variable \"$name\"\n" unless exists $allowed{$name0};
+		my ($self, $name) = @_;
+
+		my $class = ref($self) || $self;
+		$name = lc($name);
+
+		# если предопределенный набор символов, то подменяем на текстовый узел
+		return VHostGen::Template::Text->new($constant{$name})
+			if exists $constant{$name};
+
+		(my $name_zero = $name) =~ s/\d+$/0/;
+		die qq[Unknown or disallowed variable "$name"\n]
+			unless exists $allowed{$name_zero};
+
 		bless \$name, $class;
 	}
+
+	# всегда динамично
 	sub isvar($) { 1; }
+
+	# проверка: определено ли значение
 	sub isset($) {
-		my $self = $_[0];
-		ref $self or croak "usage: \$obj->isset()";
+		my ($self) = @_;
+
+		ref($self) or croak 'usage: $obj->isset()';
 		defined $config->{$$self};
 	}
+
 	sub get($) {
-		my $self = $_[0];
-		ref $self or croak "usage: \$obj->get()";
-		my $v = $config->{$$self};
-		return '' unless defined $v;
-		my $r = ref $v;
-		return $v unless $r;
-		return join(' ', map {ref($_) && $_->isa('VHostGen::Template::Item') ? $_->get() : $_} @$v) if $r eq 'ARRAY';
-		$v;
+		my ($self) = @_;
+
+		ref($self) or croak 'usage: $obj->get()';
+		my $value = $config->{$$self};
+		# если не определено, то пустое значение
+		return '' unless defined $value;
+
+		# если простое скалярное значение, то возвращаем его
+		my $ref = ref $value;
+		return $value unless $ref;
+
+		# если список, то это список элементов шаблона
+		# склеиваем его через пробел
+		return join(
+			' ',
+			map {
+				( ref($_) && $_->isa('VHostGen::Template::Item') )
+					? $_->get()
+					: $_
+			} @{$value}
+		)
+			if $ref eq 'ARRAY';
+
+		$value;
 	}
+
 	1;
 }
 
+# условный блок в шаблоне
 { package VHostGen::Template::Cond;
 	use base ('VHostGen::Template::Item');
 	use Carp;
+
+	# \@items - массив вложенных элементов шаблона
 	sub new($\@) {
-		my $class = ref $_[0] || $_[0];
+		my ($obj, $items) = @_;
+
+		my $class = ref($obj) || $obj;
 		my $self = {
-			items => $_[1],
+			# все элементы
+			items => $items,
+			# только динамические элементы
 			vars  => [],
 		};
-		for (@{$self->{items}}) {
-			ref($_) && $_->isa('VHostGen::Template::Item') or croak "All array items must be an instance of VHostGen::Template::Item class";
-			push @{$self->{vars}}, $_ if $_->isvar();
+		# все элементы массива должны быть элементами шаблона
+		for my $item (@{$self->{items}}) {
+			ref($item) && $item->isa('VHostGen::Template::Item')
+				or croak "All array items must be an instance of VHostGen::Template::Item class";
+
+			push @{$self->{vars}}, $item
+				if $item->isvar();
 		}
-		unless (@{$self->{vars}}) {
-			return VHostGen::Template::Text->new(join '', map {$_->get()} @{$self->{items}});
-		}
+		# если нет динамических элементов, то подменяем на текстовый узел
+		return VHostGen::Template::Text->new(join( '', map {$_->get()} @{$self->{items}} ))
+			unless @{$self->{vars}};
+
 		bless $self, $class;
 	}
+
+	# проверка динамичности
 	sub isvar($) {
-		my $self = $_[0];
-		ref $self or croak "usage: \$obj->isvar()";
-		scalar @{$self->{vars}};
+		my ($self) = @_;
+
+		ref($self) or croak 'usage: $obj->isvar()';
+
+		# константно, если нет динамических элементов
+		return unless @{$self->{vars}};
+
+		1;
 	}
+
+	# проверка: определено ли
 	sub isset($) {
-		my $self = $_[0];
-		ref $self or croak "usage: \$obj->isset()";
+		my ($self) = @_;
+
+		ref($self) or croak 'usage: $obj->isset()';
+
+		# определено, если нет динамических элементов
 		return 1 unless @{$self->{vars}};
-		for (@{$self->{vars}}) {
-			return 1 if $_->isset();
+
+		# определено, если определен хотя бы 1 из динамических элементов
+		for my $var (@{$self->{vars}}) {
+			return 1 if $var->isset();
 		}
-		0;
+
+		# все динамические неопределены, значит и сам не определен
+		return;
 	}
+
 	sub get($) {
-		my $self = $_[0];
-		ref $self or croak "usage: \$obj->get()";
-		join '', map {$_->isset() ? $_->get() : ()} @{$self->{items}};
+		my ($self) = @_;
+
+		ref($self) or croak 'usage: $obj->get()';
+		join( '', map { $_->isset() ? $_->get() : () } @{$self->{items}} );
 	}
+
 	1;
 }
 
+# шаблон
 { package VHostGen::Template;
 	use base ('VHostGen::Template::Cond');
+
+	# $code        - исходный текст шаблона
+	# $LinesBefore - количество строк в файле, которые находятся перед нечалом шаблона
 	sub new($$$) {
-		my $class = ref $_[0] || $_[0];
-		my $code = $_[1];
-		my $LinesBefore = $_[2];
-		my $items = [];
-		my @itemsStack;
+		my ($self, $code, $LinesBefore) = @_;
+
+		my $class   = ref($self) || $self;
+		my $items   = []; # текущие элемента шаблона
 		my $lastPos = 0;
+		# стек родителььских шаблонов для обработки вложенных блоков условий
+		my @itemsStack;
+
+		# пытаемся парсить шаблон
 		eval {
+			## шаблон - это сколько угодно элементов
 			# template  :: (<text> | <var> | <cond>)*
+			#
+			## простой текст - любые символы, кроме служебных [] и {} .
 			# text      :: [^\[\]{}]+
+			#
+			## переменная - что-то в {} .
 			# var       :: \{[^{}]+\}
+			#
+			## условный блок - шаблон в [] .
 			# cond      :: \[<template>\]
-			
+
 			pos($code) = 0;
 			while ($code =~ /(?<text>[^\[\]{}]+)|\{(?<var>[^{}]*)\}|(?<cond>[\[\]])|(?<err>.)/sg)
 			{
+				# позиция начала совпадения
 				$lastPos = $-[0];
+				# найденные элементы
 				my ($text, $var, $cond, $err) = @+{ qw(text var cond err) };
-				die "Invalid character '$err'\n" if defined $err;
-				# cond "[" or "]"
+
+				# нашли что-то левое - ошибка
+				die "Invalid character '$err'\n"
+					if defined $err;
+
+				# граница условного блока: "[" или "]"
 				if (defined $cond) {
-					# [
+					# начало "["
 					if ($cond eq '[') {
+						# текущие элементы в стек
 						push @itemsStack, $items;
+						# и начинаем класть вложенные элементы в новый список
 						$items = [];
 					}
-					# ]
+					# конец "]"
 					else {
-						@itemsStack or die "Unexpected ']' without opening '['\n";
-						my $C;
-						if (@$items) {
-							$C = VHostGen::Template::Cond->new($items);
-						}
+						# внезапный конц несуществующего блока - ошибка
+						die "Unexpected ']' without opening '['\n"
+							unless @itemsStack;
+
+						# из собранных элементов шаблона создаем новый элемент блока условия
+						# если, конечно, что-то насобирали
+						my $cond_item = VHostGen::Template::Cond->new($items)
+							if @$items;
+
+						# восстанавливаем родительский список элементов из стека
 						$items = pop @itemsStack;
-						if ($C) {
-							push @$items, $C;
-						}
+						# добвляем новый блок в этот список
+						push @$items, $cond_item
+							if $cond_item;
 					}
 				}
-				# variable {var}
+				# переменная {var}
 				elsif (defined $var) {
-					die "Unable to use template variable \"$var\" directly in template\n" if exists $configVarName{$var} && ($configVarName{$var} & VHostGen::VAR_TYPE) == VHostGen::VAR_TYPE_TEMPLATE;
+					# добавляем с список новый элемент переменной
 					push @$items, VHostGen::Template::Var->new($var);
 				}
-				# plain text
+				# простой текст
 				else {
+					# добавляем в список элементов новый текстовый элемент
 					push @$items, VHostGen::Template::Text->new($text);
 				}
 			}
 		};
+		# не удалось распарсить шаблон - выбрасываем ошибки с более подробной инфой
 		if ($@) {
 			chomp $@;
-			my $n = substr($code, 0, $lastPos);
-			$n = 1 + ($n =~ tr/\n/\n/);
-			die "Template error: $@ at line " . ($LinesBefore + $n) . " (inner line $n, inner offset: $lastPos)\n";
+			# пропарсенная часть шаблона от начала до места ошибки
+			my $start = substr($code, 0, $lastPos);
+			# человеческий номер строки внутри кода шаблона
+			my $line = 1 + ($start =~ tr/\n/\n/);
+			die "Template error: $@ at line " . ($LinesBefore + $line) . " (inner line $line, inner offset: $lastPos)\n";
 		}
-		if (@itemsStack) {
-			die "Template error: Expected ']' " . scalar(@itemsStack) . " times to close all unclosed '[' at the end\n";
-		}
+
+		# остались незакрытие блоки - ошибка в конце
+		die "Template error: Expected ']' " . scalar(@itemsStack) . " times to close all unclosed '[' at the end\n"
+			if @itemsStack;
+
+		# родительской конструктор
 		$class->SUPER::new($items);
 	}
+
+	# конструктор пустого шаблона
 	sub newEmpty($) {
-		my $class = ref $_[0] || $_[0];
+		my ($self) = @_;
+
+		my $class = ref($self) || $self;
 		$class->SUPER::new([]);
 	}
+
+	# шаблон всегда динамичен (почему? забыл уже)
 	sub isvar($) { 0; }
+
+	# шаблон всегда определен
 	sub isset($) { 1; }
+
 	1;
 }
 
-sub readConfig ($\%$) {
-	my ($filename, $rhConfig, $source) = @_;
-	$source &= VAR_SOURCE;
-	if (-e $filename) {
-		my $data;
-		{
-			local $/;
-			open my $h, '<', $filename or die "Unable to read configuration file $filename\n";
-			$data = <$h>;
-			close $h;
-		}
-		# replace CRLF and CR with LF
-		$data =~ s/\r\n?/\n/g;
-		pos($data) = 0;
-		my $line = 1;
-		while ($data =~ /
-				^                                   # start of line
-				\h*                                 # skip leading horizontal spaces
-				(?:                                 # optional one of:
-					[#].*                           #   comment
-				|                                   # or
-					(?<name>[a-z_][a-z_0-9]*)       #   (option name)
-					(?:                             #   optional with:
-						\h+                         #     horizantal spaces
-						(?:                         #     one of:
-							(?<ml><<<<\n)           #       (open multiline marker with new line)
-							(?:                     #       optional content:
-								(?<mlv>[\d\D]*?)    #         (multiline value)
-								\n                  #         new line
-							)??                     #       ;  # avoid to eat more then one trailing markers
-							>>>>                    #       close marker
-						|                           #     or
-							(?<iv>.*)               #       (simple inline value)
-						)                           #     ;
-					)?                              #   ;
-				|                                   # or
-					(?<invalid>.+)                  #   (invalid something else)
-				)?                                  # ;
-				$                                   # end of line
-			/gmxi)
-		{
-			my ($name, $ml, $mlv, $iv, $invalid) = @+{ qw(name ml mlv iv invalid) };
-			die "Unknown character '" . substr($invalid, 0, 1) . "' at line $line\n" if defined $invalid;
-			if (defined $name) {
-				my ($lcName, $value, $oLine) = (lc $name, '', $line);
-				my $lcName0 = $lcName;
-				$lcName0 =~ s/\d+$/0/;
-				exists $configVarName{$lcName0} && ($configVarName{$lcName0} & $source)
-					or die "Unknown option '$name' at line $oLine\n";
-				if (defined $iv) {
-					# inline value
-					($value = $iv) =~ s/\h+$//;
-				}
-				elsif (defined $ml) {
-					# multiline value
-					$line++;
-					if (defined $mlv) {
-						$value = $mlv;
-						$line += 1 + ($value =~ tr/\n/\n/);
+# получение уникальных элементов списка с сохранением порядка следования
+sub uniq(@) {
+	my %seen;
+	grep { ! $seen{$_}++ } @_;
+}
+
+# некое подобие пула конфигов
+{ my (%loaded_configs);
+	# загрузка конфига из файла
+	# $filename - имя файла конфига
+	sub loadConfig($) {
+		my ($filename) = @_;
+
+		my $config = {};
+
+		# файл конфига существует?
+		if (-e $filename) {
+			# содержимое файла
+			my $data;
+			# чтение файла
+			{
+				local $/;
+				open(my $h, '<', $filename)
+					or die "Unable to read configuration file $filename\n";
+
+				$data = <$h>;
+				close $h;
+			}
+			# заменяем CRLF и CR на LF
+			$data =~ s/\r\n?/\n/g;
+
+			pos($data) = 0;
+			my $line = 1;
+			# парсим конфиг по синтаксическим строкам
+			# (многострочное значение парсим залпом, как одну строку)
+			while ($data =~ /
+					# начало строки
+					^
+					# пропускаем горизонтальные пробелы в начале
+					\h*
+					# затем необязательно что-то из этого:
+					(?:
+						# комментарий
+						\#.*
+					|
+						# директива
+						# имя директивы
+						(?<name>
+							[a-z_][a-z_0-9]*
+						)
+						# затем опционально
+						(?:
+							# горизонтальные пробельные символы
+							\h+
+							# затем что-то из этого:
+							(?:
+								# маркер начала многострочного значения
+								(?<ml>
+									<<<<\n
+								)
+								# необязателное содержимое многострочногоблока значения
+								(?:
+									# захватываем само значение
+									(?<mlv>
+										# каждая строка внутри, хоты бя одна строка
+										(?:
+											# необязательно переход на новую строку после предыдущей
+											\n?
+											# начало строки
+											^
+											# но чтобы далее не было маркера конца
+											(?!
+												>>>>$
+											)
+											# содержимое строки
+											.*+
+										)*+
+									)
+									# новая строка за последней строкой тела - не входит в значение
+									\n
+								)??
+								# маркер конца блока
+								>>>>$
+							|
+								# простое однострочное значение
+								(?<iv> .* )
+							)
+						)?
+					|
+						# что-то другое невалидное
+						(?<invalid> .+ )
+					)?
+					# конец строки
+					$
+				/gmxi)
+			{
+				# собранные элементы
+				my ($name, $multiline, $multiline_value, $inline_value, $invalid) =
+					@+{ qw(name ml mlv iv invalid) };
+
+				# нашли что-то невалидное - ошибка
+				die "Unknown character '" . substr($invalid, 0, 1) . "' at line $line\n"
+					if defined $invalid;
+
+				# директива
+				if (defined $name) {
+					my ($name_lower, $value, $start_line) = (lc $name, '', $line);
+					(my $name_lower_zero = $name_lower) =~ s/\d+$/0/;
+					# аесть такая директива вообще?
+					exists $configVarName{$name_lower_zero}
+						or die "Unknown option '$name' at line $start_line\n";
+
+					# однострочное значение
+					if (defined $inline_value) {
+						($value = $inline_value) =~ s/\h+$//;
 					}
-				}
-				# no value specified: empty or undef
-				$value = undef if $value eq '' && ($configVarName{$lcName0} & VAR_EMPTY) == VAR_EMPTY_UNDEF;
-				
-				if (($configVarName{$lcName0} & VAR_DATA) == VAR_DATA_ARRAY) {
-					my $nv;
-					if (defined $value) {
-						$value =~ s/^\s+|\s+$//g;
-						if ($value ne '') {
-							$nv = [split(/\s+/, $value)];
-							if (($configVarName{$lcName0} & VAR_TYPE) == VAR_TYPE_TEMPLATE) {
-								for (@$nv) {
-									eval {
-										$_ = VHostGen::Template->new($_, $oLine);
-									};
-									if ($@) {
-										chomp $@;
-										die "Error in value of option $name on line $oLine: $@\n";
+					# многострочное значение
+					elsif (defined $multiline) {
+						$line++;
+						if (defined $multiline_value) {
+							$value = $multiline_value;
+							$line += 1 + ($value =~ tr/\n/\n/);
+						}
+					}
+
+					# пустое значение: пусто или не определено
+					( $value eq '' && VAR_EMPTY_UNDEF == ($configVarName{$name_lower_zero} & VAR_EMPTY) )
+						and $value = undef;
+
+					# должен быть массив?
+					if (VAR_DATA_ARRAY == ($configVarName{$name_lower_zero} & VAR_DATA)) {
+						my $new_value;
+						if (defined $value) {
+							$value =~ s/^\s+|\s+$//g;
+							if ($value ne '') {
+								# пилим на части
+								$new_value = [ split(/\s+/, $value) ];
+								# это еще и шаблон?
+								if (VAR_TYPE_TEMPLATE == ($configVarName{$name_lower_zero} & VAR_TYPE)) {
+									# создаём шаблоны
+									for my $word (@$new_value) {
+										eval {
+											$word = VHostGen::Template->new($word, $start_line);
+										};
+										if ($@) {
+											chomp $@;
+											die "Error in value of option $name on line $start_line: $@\n";
+										}
 									}
 								}
 							}
 						}
+						# значение - всегда массив
+						$value = $new_value || [];
 					}
-					$value = defined $nv ? $nv : [];
-				}
-				else {
-					if (defined $value) {
-						if (($configVarName{$lcName0} & VAR_TYPE) == VAR_TYPE_TEMPLATE) {
-							eval {
-								$value = VHostGen::Template->new($value, $oLine);
-							};
-							if ($@) {
-								chomp $@;
-								die "Error in value of option $name on line $oLine: $@\n";
+					# скаляр
+					else {
+						if (defined $value) {
+							# должен быть шаблон?
+							if (VAR_TYPE_TEMPLATE == ($configVarName{$name_lower_zero} & VAR_TYPE)) {
+								eval {
+									$value = VHostGen::Template->new($value, $start_line);
+								};
+								if ($@) {
+									chomp $@;
+									die "Error in value of option $name on line $start_line: $@\n";
+								}
 							}
 						}
 					}
+
+					# кладем дорективу и значение в конфиг
+					$config->{$name_lower} = $value;
 				}
-				$rhConfig->{$lcName} = $value;
+				$line++;
 			}
-			$line++;
+
+			return $config;
+		}
+		else {
+			return;
 		}
 	}
-	for (grep {
-			($configVarName{$_} & $source) && 
-			($configVarName{$_} & VAR_DATA) == VAR_DATA_SCALAR && 
-			($configVarName{$_} & VAR_TYPE) == VAR_TYPE_TEMPLATE
-		} keys %configVarName)
-	{
-		next if defined $rhConfig->{$_};
-		$rhConfig->{$_} = VHostGen::Template->newEmpty();
+
+	# получение конфига по имени файла
+	# если такой уже грузили, то достаётся из кеша
+	# $filename - имя файла конфига
+	sub getConfig($) {
+		my ($filename) = @_;
+		exists $loaded_configs{$filename}
+			or $loaded_configs{$filename} = loadConfig($filename);
+
+		$loaded_configs{$filename};
 	}
+}
+
+# применене загруженного конфига в конечный конфиг
+# \%target - ссылка на конечный конфиг
+# \%data   - ссылка на загруженный конфиг
+# $source  - тип загруженного конфига
+sub applyConfig(\%\%$) {
+	my ($target, $data, $source) = @_;
+
+	$source &= VAR_SOURCE;
+
+	for my $name (keys $data) {
+		# матюгаемся на директивы, которые не могут быть в этом типе конфига
+		($configVarName{$name} & $source)
+			or die "Option '$name' is not allowed in this file\n";
+
+		$target->{$name} = $data->{$name};
+	}
+
+	# инициализируем неопределенные директивы-шаблоны
+	$target->{$_} = VHostGen::Template->newEmpty()
+		for grep {
+			($configVarName{$_} & $source)
+			&& VAR_DATA_SCALAR   == ($configVarName{$_} & VAR_DATA)
+			&& VAR_TYPE_TEMPLATE == ($configVarName{$_} & VAR_TYPE)
+			&& ! defined $target->{$_}
+		} keys %configVarName;
+
 	1;
 }
 
+# чтение файла конфига в текущий глобальный конфиг программы
+# $filename - имя файла конфига
+# \%config  - конечный конфиг, в который класть директивы
+# $source   - тип загружаемого конфига
+sub readConfig ($\%$) {
+	my ($filename, $config, $source) = @_;
+
+	my $read_config = getConfig($filename);
+	applyConfig(%$config, %{ $read_config || {} }, $source);
+
+	return unless $read_config;
+	1;
+}
+
+# слияние конфигов директории
+# \%target - ссылка на текущий конфиг
+# \%add    - ссылка на вливаемый конфиг
+sub mergeDirConfig(\%\%) {
+	my ($target, $add) = @_;
+
+	for my $name (keys $add) {
+		(my $name_zero = $name) =~ s/\d+$/0/;
+		# свойства директивы
+		my $desc = $configVarName{$name_zero};
+
+		my $merge_to = ($desc & VAR_MERGE_TO);
+		if (VAR_MERGE_TO_NEVER == $merge_to) {
+			next;
+		}
+		elsif (VAR_MERGE_TO_UNDEF == $merge_to) {
+			next if defined $target->{$name};
+		}
+		elsif (VAR_MERGE_TO_EMPTY == $merge_to) {
+			next if defined $target->{$name} and '' ne $target->{$name};
+		}
+		elsif (VAR_MERGE_TO_ALWAYS == $merge_to) {
+			# всегда можно
+		}
+		# else: нет грудих вариантов
+
+		# TODO зарезервировано VAR_MERGE_FROM
+
+		# если массив
+		if (VAR_DATA_ARRAY == ($desc & VAR_DATA)) {
+			if (defined $add->{$name}) {
+				# создаём новый массив
+				# иначе получим расшаренный массив и закосячим его
+				$target->{$name} = [
+					(defined $target->{$name})
+						? @{ $target->{$name} }
+						: ()
+					,
+					@{ $add->{$name} }
+				];
+			}
+		}
+		# скаляр
+		else {
+			$target->{$name} = (defined $add->{$name})
+				? $add->{$name}
+				: undef
+			;
+
+			$target->{$name} = ''
+				if !defined $target->{$name} && VAR_EMPTY_VALUE == ($desc & VAR_EMPTY);
+		}
+	}
+
+	1;
+}
+
+# функции записи конечного генерируемого конфига
 { my $ApacheFH;
+	# открытие файла за запись
 	sub ApacheConfOpen () {
-		die "No value specified for ApacheConf\n" unless defined $config->{apacheconf};
-		open $ApacheFH, ">", $config->{apacheconf} or die "Unable to open ApacheConf file \"$config->{apacheconf}\"\n";
+		die "No value specified for ApacheConf\n"
+			unless defined $config->{apacheconf};
+
+		open $ApacheFH, ">", $config->{apacheconf}
+			or die qq[Unable to open ApacheConf file "$config->{apacheconf}"\n];
+
 		print $ApacheFH $config->{beginfile}->get();
 		1;
 	}
+
+	# запись текущего виртуального хоста по шаблону
 	sub ApacheConfVHost () {
 		print $ApacheFH "\n", $config->{virtualhost}->get();
 		1;
 	}
 }
+
+# функции генерации файла hosts
 { my $WinHostsFH;
+	# открытие файла на запись, если он включен директивой
 	sub WinHostsOpen() {
 		return unless defined $config->{winhosts};
-		die "WinHostsIP has no value when WinHosts is specified\n" unless defined $config->{winhostsip};
-		open $WinHostsFH, ">", $config->{winhosts} or die "Unable to open WinHosts file \"$config->{winhosts}\"\n";
+		die "WinHostsIP has no value when WinHosts is specified\n"
+			unless defined $config->{winhostsip};
+
+		open $WinHostsFH, ">", $config->{winhosts}
+			or die qq[Unable to open WinHosts file "$config->{winhosts}"\n];
+
 		print $WinHostsFH "# This file has been generated automatically by $config->{version} at $config->{time}\n\n";
 		1;
 	}
+
+	# сохранение домена текущего виртуального хоста
 	sub WinHostsAdd() {
 		return unless $WinHostsFH;
 		print $WinHostsFH "$config->{winhostsip}\t\t$config->{domain}\n";
@@ -489,104 +774,160 @@ sub readConfig ($\%$) {
 	}
 }
 
-sub usage() {
-	my $v = VERSION;
-	die qq($v
-Usage: vhostgen [<directory>]
+# подробный man программы
+sub usage_man() {
+	use Pod::Man;
 
-  <directory>
-    Base working directory. By default current working directory will be used.
-);
-
+	my $parser = Pod::Man->new(
+		utf8    => 1,
+		center  => VERSION_NAME . " Manual",
+		release => VERSION_NUMBER,
+	);
+	if ( open(my $man, "|man -l -") ) {
+		$parser->parse_from_file(__FILE__, $man);
+		close $man;
+		exit;
+	}
+	else {
+		warn "Can't create a pipe to man tool\n";
+		warn "Try to execute:  pod2man --utf8 '$0' | man -l -\n";
+		exit 1;
+	}
 }
 
+# инициализация при запуске
 sub init () {
-	# autoflush on
+	# выключить буферизацию
 	$| = 1;
 	my $oldfh = select STDERR;
 	$| = 1;
 	select $oldfh;
-	
-	my $argc = scalar @ARGV;
-	if (0 == $argc) {
-		$cwd = Cwd::cwd();
-	}
-	elsif (1 == $argc) {
-		my $v = $ARGV[0];
-		if ($v eq "-h" || $v eq "-?" || $v eq "--help") {
-			usage();
-		}
-		elsif (-d $v) {
-			$cwd = Cwd::abs_path($v);
-		}
-		else {
-			usage();
-		}
+
+	Getopt::Long::Configure("bundling");
+	my (%opt);
+	GetOptions(\%opt,
+		"help|h|?",
+		"man",
+		"directory|d=s",
+	)
+		or pod2usage(2);
+
+	pod2usage(1)
+		if defined $opt{help};
+
+	usage_man()
+		if defined $opt{man};
+
+	$opt{directory} = $ARGV[0]
+		if @ARGV && ! defined $opt{directory};
+
+	if (defined $opt{directory}) {
+		-d $opt{directory}
+			or pod2usage({
+				-exitval => 2,
+				-message => qq[Directory not found: "$opt{directory}"],
+			})
+		;
+
+		$cwd = Cwd::abs_path( $opt{directory} );
 	}
 	else {
-		usage();
+		$cwd = Cwd::cwd();
 	}
-	
+
 	print VERSION, "\n";
-	
+
+	# переход в стартовую директорию
 	chdir $cwd or die "Unable to change working directory to $cwd\n";
 	print "cwd is $cwd\n";
-	
-	$config->{cwd} = $cwd;
-	$config->{cwd} =~ tr{\\}{/};
+
+	$config->{cwd}  = $cwd;
+	$config->{cwd}  =~ tr{\\}{/};
 	$config->{path} = $config->{cwd};
 	$config->{subpath} = '';
-	
-	my ($s, $i, $h, $d, $m, $y) = localtime;
-	$config->{time} = sprintf("%04d-%02d-%02d %02d:%02d:%02d", $y + 1900, $m + 1, $d, $h, $i, $s);
-	
-	for (grep {($configVarName{$_} & VAR_SOURCE) == VAR_SOURCE_PREDEF} keys %configVarName)
+
 	{
-		$VHostGen::Template::Var::constant{$_} = $config->{$_};
+		my ($s, $i, $h, $d, $m, $y) = localtime;
+		$config->{time} = sprintf("%04d-%02d-%02d %02d:%02d:%02d", $y + 1900, $m + 1, $d, $h, $i, $s);
 	}
-	
+
+	# копируем значения предопределенных переменные конфига
+	# в список константных "переменных" для оптимизации
+	$VHostGen::Template::Var::constant{$_} = $config->{$_}
+		for grep {
+			VAR_SOURCE_PREDEF == ($configVarName{$_} & VAR_SOURCE)
+		} keys %configVarName
+	;
+
+	# грузим конфиг стартовой директории
 	my $cfg = './' . CONFIGURATION_FILE;
 	eval {
-		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL);
+		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL)
+			or die "File not found\n";
 	};
-	die "Config \"$cfg\": $@\n" if $@;
+	die qq[Config "$cfg": $@]
+		if $@;
+
+	# открываем выходные файлы
 	ApacheConfOpen();
 	WinHostsOpen();
 	print "\n";
 	1;
 }
 
+# стек конфигов при анализе директорий
 { my @configStack;
+	# бекап текущего конфига и создание нового при входе в дочернюю директорию
 	sub configPush () {
 		# бекапим ссылку на исходный конфиг
 		push @configStack, $config;
 		# новая ссылка на новый пустой конфиг
 		my $copy = {};
 		# копируем поштучно
-		for (keys %$config) {
+		for my $name (keys %$config) {
 			# кроме локальных
-			next if ($configVarName{$_} & VAR_SCOPE) == VAR_SCOPE_LOCAL;
-			$copy->{$_} = $config->{$_};
+			next if VAR_SCOPE_LOCAL == ($configVarName{$name} & VAR_SCOPE);
+			$copy->{$name} = $config->{$name};
 		}
 		# подменяем ссылку
 		$config = $copy;
 		1;
 	}
 
+	# откат к родительскому конфигу при возврате из дочерней директории
 	sub configPop () {
-		croak "Config stack already empty" unless @configStack;
+		croak "Config stack already empty"
+			unless @configStack;
+
 		$config = pop @configStack;
 	}
 }
 
+# перечисление дочерних директорий
+# $path - путь родительской директории, в которой ищем дочерние
 sub enumDirs ($) {
+	my ($path) = @_;
+
 	return unless wantarray;
-	opendir my $dir, $_[0] or die "Unable to read the directory.\n";
-	my @dirs = grep {$_ ne '.' && $_ ne '..' && -d $_[0] . '/' . $_} readdir $dir;
+	opendir my $dir, $path
+		or die "Unable to read the directory.\n";
+
+	my @dirs = grep {
+		$_ ne '.'
+		&& $_ ne '..'
+		&& -d $path . '/' . $_
+	} readdir $dir;
 	closedir $dir;
 	@dirs;
 }
 
+# проверка валидности доменной метки
+# Может состоять из маленьких латинских буков, цифр и дефиса,
+# но не может начинаться и наканчиваться на дефис.
+# домен первого уровня ($level = 0) также не может начинаться на цифру.
+#
+# $label - проверяемая метка
+# $level - уровень.
 sub isValidDomainLabel($$) {
 	my ($label, $level) = @_;
 	return $level
@@ -595,132 +936,226 @@ sub isValidDomainLabel($$) {
 }
 
 { my (@subpath, @domains, @names, @namesCounts);
-	my $totalVHosts = 0;
+	my (%hosts, @host_index);
 
+	# генерация всех полных алиасов для текущего конфига
 	sub aliases() {
-		my $L = scalar @names;
-		my $L1 = $L - 1;
-		my @index = (0) x $L;
-		my (@a, %d);
-		my $di = 0;
-		my $Count = 1;
-		$Count *= $namesCounts[$_] for 0 .. $L1;
-		my (%bak, $n);
+		my $names_count = scalar @names;
+		my $last_name_index = $names_count - 1;
+		my @index = (0) x $names_count;
+		my (@aliases, %domain_aliases, %bak);
+		my $domain_alias_index = 0;
+		my $total_count = 1;
+		$total_count *= $namesCounts[$_] for 0 .. $last_name_index;
+
 		if (defined $config->{domainalias}) {
-			for (0 .. $L1) {
-				$n = 'domain' . $_;
+			# бекапим переменные domainN и domain
+			for my $i (0 .. $last_name_index) {
+				my $n = 'domain' . $i;
 				$bak{$n} = $config->{$n};
 			}
 			$bak{domain} = $config->{domain};
 		}
-		for (0 .. $Count - 1) {
+
+		# полный перебор всех комбинаций всех имен и алиасов директорий
+		for my $total_index (0 .. $total_count - 1) {
+			# если задан DomainAlias
 			if (defined $config->{domainalias}) {
-				push @a, $config->{domain} = join '.', map { $config->{'domain' . $_} = $names[$_]->[$index[$_]] } reverse 0 .. $L1;
-				$n = 0;
-				for (map {$_->get()} @{$config->{domainalias}}) {
-					$n++;
-					next if exists $d{$_};
-					$d{$_} = [$n, ++$di];
+				# генерируем всё из него для каждого варианта полного алиаса
+				#
+				# для этого заполняем domain и domainN текущими значениями
+				push @aliases, $config->{domain} = join(
+					'.',
+					map {
+						$config->{'domain' . $_} = $names[$_]->[$index[$_]]
+					} reverse 0 .. $last_name_index
+				);
+				# и получаем результаты из DomainAlias'ов
+				my $n = 0;
+				for my $domain_alias ( map { $_->get() } @{$config->{domainalias}} ) {
+					next if exists $domain_aliases{$domain_alias};
+					$domain_aliases{$domain_alias} = {
+						alias => $domain_alias,
+						index => ++$n,
+						id    => ++$domain_alias_index,
+					};
 				}
 			}
+			# иначе нет DomainAlias'ов
 			else {
-				push @a, join '.', map {$names[$_]->[$index[$_]]} reverse 0 .. $L1;
+				# единственный домен из текущих имен
+				push @aliases, join(
+					'.',
+					map {
+						$names[$_]->[$index[$_]]
+					} reverse 0 .. $last_name_index
+				);
 			}
+
+			# перемещаем индексы на следующую комбинацию
 			my $c = 1;
-			for (reverse 0 .. $L1) {
-				$index[$_] += $c;
-				last if $index[$_] < $namesCounts[$_];
-				$c = int $index[$_] / $namesCounts[$_];
-				$index[$_] %= $namesCounts[$_]
+			for my $n (reverse 0 .. $last_name_index) {
+				$index[$n] += $c;
+				last if $index[$n] < $namesCounts[$n];
+				$c = int( $index[$n] / $namesCounts[$n] );
+				$index[$n] %= $namesCounts[$n]
 			}
 		}
-		
+
 		if (defined $config->{domainalias}) {
-			# убираем из %d всё, что уже есть в @a
-			delete $d{$_} for @a;
-			# добавляем %d в @a
-			push @a, map {$_->[0]} sort {$a->[1] <=> $b->[1] or $a->[2] <=> $b->[2]} map {[$_, $d{$_}->[0], $d{$_}->[1]]} keys %d;
-			
-			for (0 .. $L1) {
-				$n = 'domain' . $_;
+			# убираем из %domain_aliases всё, что уже есть в @aliases
+			delete $domain_aliases{$_} for @aliases;
+
+			# добавляем %domain_aliases в @aliases
+			push @aliases, map { $_->{alias} }
+				sort {
+					$a->{index} <=> $b->{index}
+					or $a->{id} <=> $b->{id}
+				}
+				values %domain_aliases;
+
+			# достаем обратно из бекапа domain и domainN
+			for my $i (0 .. $last_name_index) {
+				my $n = 'domain' . $i;
 				$config->{$n} = $bak{$n};
 			}
 			$config->{domain} = $bak{domain};
 		}
-		
-		# первый элемент всегда будет равен domain'у, поэтому убираем его
-		shift @a;
-		
-		$config->{alias} = @a ? join(' ', @a) : undef;
-		scalar @a;
+
+		# все собранные алиасы в конфиг
+		$config->{aliases} = \@aliases;
+		1;
 	}
-	
+
+	# кладем текущий конфиг в хеш виртуальных хостов по соответствующему пути
 	sub vhostDir() {
-		$config->{extheaders} = $config->{headers}->isset() ? $config->{headers}->get() : undef;
-		aliases();
-		ApacheConfVHost();
-		WinHostsAdd();
-		
-		print "[+] $config->{domain}\t .$config->{subpath}\n";
-		++$totalVHosts;
+		my $path = $config->{path};
+		# такой уже есть - слияние
+		if (exists $hosts{$path}) {
+			mergeDirConfig( %{ $hosts{$path} }, %$config );
+		}
+		# еще нет - добавление
+		else {
+			$hosts{$path} = $config;
+			push @host_index, $path;
+		}
 	}
-	
+
+	# анализ директории
 	sub domainDir();
 	sub domainDir() {
 		my @dirs = enumDirs('.' . $config->{subpath});
 		# отсортировать без учета регистра. преобразование Шварца
-		@dirs = map {$_->[1]}
-				sort {$a->[0] cmp $b->[0]}
-				map {[lc($_), $_]}
+		@dirs = map  { $_->[1] }
+				sort { $a->[0] cmp $b->[0] }
+				map  { [lc($_), $_] }
 				@dirs;
 		for my $dir (@dirs) {
 			configPush();
-			push @subpath, $dir;
 			$config->{depth}--;
-			$config->{'dir' . $#subpath} = $dir;
+
+			push @subpath, $dir;
+			my $level = $#subpath;
+			$config->{'dir' . $level} = $dir;
+			$config->{dirs} = [ @subpath ];
 			$config->{subpath} = '/' . join('/', @subpath);
-			$config->{path} = $config->{cwd} . $config->{subpath};
-			my $cfg = '.' . $config->{subpath} . '/' .  CONFIG_DIR_FILE;
+			my $path = $config->{cwd} . $config->{subpath};
+			$config->{path}    = Cwd::abs_path($path);
+
+			my $cfg = $config->{path} . '/' .  CONFIG_DIR_FILE;
 			eval {
 				readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
 			};
-			warn "Config \"$cfg\" ignored: $@\n" if $@;
-			
-			TRY: {
-				last if defined $config->{skip};
-				my $domain = \( $config->{'domain' . $#subpath} = lc(defined $config->{name} ? $config->{name} : $dir) );
-				unless (isValidDomainLabel($$domain, $#subpath)) {
-					warn "Invalid domain \"$$domain\" in \".$config->{subpath}\" ignored.\n";
-					last;
+			warn qq[Config "$cfg" ignored: $@\n]
+				if $@;
+
+			unless (defined $config->{skip}) {
+				# попали на симлинк
+				if (-l $path) {
+					# изменяем Name в имя директории, куда ссылается симлинк,
+					# если Name еще не задан
+					defined $config->{name}
+						or $config->{name} = File::Basename::basename( $config->{path} );
+
+					# добавляем имя симлинка в DirAlias
+					# создаем новый массив, чтобы не насоздавать
+					# расшаренных ссылок из рахных конфигов
+					$config->{diralias} = [
+						(defined $config->{diralias})
+							? @{$config->{diralias}}
+							: ()
+						,
+						$config->{dirs}->[$level],
+					];
 				}
-				push @domains, $$domain;
-				$config->{domain} = join '.', reverse @domains;
-				
-				my @n = ($$domain, defined $config->{diralias} ? @{$config->{diralias}} : ());
-				push @names, \@n;
-				push @namesCounts, scalar @n;
-				
-				if ($config->{depth} > 0) {
-					domainDir();
+
+				my $domain = \(
+					$config->{'domain' . $level} = lc(
+						(defined $config->{name})
+							? $config->{name}
+							: $config->{dirs}->[$level]
+					)
+				);
+				if (isValidDomainLabel($$domain, $level)) {
+					push @domains, $$domain;
+
+					my @dir_aliases = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
+					push @names, \@dir_aliases;
+					push @namesCounts, scalar @dir_aliases;
+
+					if ($config->{depth} > 0) {
+						domainDir();
+					}
+					else {
+						aliases();
+						vhostDir();
+					}
+
+					pop @namesCounts;
+					pop @names;
+					pop @domains;
 				}
 				else {
-					vhostDir();
+					warn qq[Invalid domain "$$domain" ignored. Found in "$path".\n];
 				}
-				
-				pop @namesCounts;
-				pop @names;
-				pop @domains;
 			}
-			
+
 			pop @subpath;
 			configPop();
 		}
 		1;
 	}
-	
-	sub result() {
-		if ($totalVHosts) {
-			print "\n$totalVHosts virtual hosts created\n";
+
+	# генерация в ыходного конфига хостов
+	sub generateVhosts() {
+		my $bak = $config;
+		for my $path (@host_index) {
+			$config = $hosts{$path};
+
+			$config->{extheaders} = ( $config->{headers}->isset() )
+				? $config->{headers}->get()
+				: undef
+			;
+
+			my @aliases = uniq( @{ $config->{aliases} } );
+			# first item will be the main domain name
+			# exclude it from aliases
+			$config->{domain} = shift @aliases;
+
+			$config->{alias} = (@aliases)
+				? join(' ', @aliases)
+				: undef
+			;
+
+			ApacheConfVHost();
+			WinHostsAdd();
+
+			print "[+] $config->{domain}\t $config->{path}\n";
+		}
+		$config = $bak;
+
+		if (@host_index) {
+			print "\n" . scalar(@host_index). " virtual hosts created\n";
 		}
 		else {
 			print "No virtual hosts created\n";
@@ -730,5 +1165,601 @@ sub isValidDomainLabel($$) {
 
 init();
 domainDir();
-result();
+generateVhosts();
 1;
+__END__
+
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+vhostgen - Утилита генерации конфигов виртуальных хостов Apache на основе
+структуры директорий
+
+=head1 SYNOPSIS
+
+B<.vhostgen> [I<options>] [I<directory>]
+
+B<.vhostgen> (B<-h> | B<-?> | B<--help>)
+
+B<.vhostgen --man>
+
+=head1 DESCRIPTION
+
+Утилита B<vhostgen> предназначена для генерации конфигурационного файла
+виртуальных хостов веб сервера. Программа сканирует дерево каталогов согласно
+заданным параметрам и генерирует файл конфига.
+
+B<vhostgen> сканирует стартовую директорию рекурсивно (согласно параметру,
+ограничивающего рекурсию). Каждая директория считается поддоменом. Самые
+вложенные из просканированных директорий становятся виртуальными хостами.
+Имена хостов строятся из имен родительских директорий, начиная со стартовой
+директории.
+
+Для успешного начала работы в стартовой директории обязательно наличие главного
+конфигурационного файла F<.vhost.cfg> . Вложенные сканируемые директории могут
+содержать конфигурационный файл F<.vhost> .
+
+=head1 OPTIONS
+
+=over
+
+=item B<-d> I<directory>, B<--directory> I<directory>
+
+Стартовая директория. Если не указана, то по умолчанию используется текущая работая директория.
+
+=item B<-h>, B<-?>, B<--help>
+
+Выводит краткую справку об использовании программы.
+
+=item B<--man>
+
+Выводит подробную документацию программы.
+
+=back
+
+=head1 CONFIGURATION
+
+=head2 Конфигурационные файлы
+
+Настройка утилиты осуществляется с помощью двух типов конфигурационных файлов:
+
+=over
+
+=item F<.vhost.cfg> - Главный конфиг
+
+Располагается в стартовой директории. Обязателен.
+
+=item F<.vhost> - Конфиг директории
+
+Располагается в анализируемых дочерних директориях при необходимости.
+
+=back
+
+Конфигурационный файл представляет собой текстовый файл с директивами.
+
+Комментарии начинаются с символа C<#> в начале строки (пробельные символы
+впереди игнорируются). Комментарий может занимать только всю
+строку целиком, не считая пробельных символов.
+
+Директивы состоят из имени и значения, разделенных хотя бы одним пробелом или
+табуляцией. Значение директивы может быть задано одинм из двух способов:
+
+=over
+
+=item B<Простое однострочное значение>
+
+Любые символы до конца строки считаются строкой значения. Пробельные символы по
+краям игнорируются. Значение целиком не может быть строкой C<<<<< <<<< >>>>> .
+
+=item B<Многострочное значение>
+
+Специальная конструкция в стиле HERE-документа. После имени директивы, пропуская
+пробелы и табуляции, должен следовать маркер начала: C<<<<< <<<< >>>>> без
+пробелов и табуляций после него. Завершающим маркером считается строка, целиком
+равная C<<<<< >>>> >>>>> без каких-либо пробельных символов в начале или в
+конце. Любые символы между открывающим и закрывающим маркером будут являться
+значением директивы. Символ переноса строки непосредственно перед завершающим
+маркером не входит в значение - он является частью закрывающего маркера.
+
+=back
+
+=head2 Директивы
+
+Имена директив нечувствительны к регистру. Большинство директив имеют строковый
+тип значения. Однако некоторые директивы могут содержать массив строк.
+
+Если значение директивы не указано или равно пустой строке (или пустому
+массиву), то считается, что значение этой директивы имеет специальное значение
+C<UNDEF>, если не описано иное поведение данной директивы.
+
+Некоторые директивы являются шаблонами. Синтаксис шаблонов описан далее
+в разделе B<TEMPLATES>.
+
+=head3 Директивы F<.vhost.cfg>
+
+=over
+
+=item B<ApacheConf> I<файл>
+
+Необязательно. Абсолютный или относительный путь к выходному файлу виртуальных
+хостов. Относительный путь вычисляется от стартовой директории. По умолчанию
+равен F<./vhosts.conf> .
+
+=item B<BeginFile> I<шаблон>
+
+Необязательно. Шаблон заголовка выходного файла. Предназначен для внесения
+строк в самое начало выходного файл виртуальных хостов. Рекомендуется
+генерировать комментарий о том, что файл был сгенерирован автоматически. См.
+переменные шаблонов B<version> и B<time>.
+
+=item B<Depth> I<n>
+
+Необязательно. Глубина дерева каталогов для анализа. По умолчанию: I<2>.
+
+=item B<Port> I<n>
+
+Необязательно. Номер порта. Предназначен для использования в шаблонах
+виртуальных хостов. По умолчанию: не задан.
+
+=item B<VirtualHost> I<шаблон>
+
+Шаблон секции виртуального хоста C<< <VirtualHost> >>.
+
+=item B<WinHosts> I<файл>
+
+Необязательно. Путь к файлу F<hosts>. Если указан, файл будет полностью
+перезаписан. Если не указан, то запись файла F<hosts> не осуществляется.
+По умолчанию: не определено - запись не ведется.
+
+=item B<WinHostsIP> I<IP>
+
+Необязательно. Не имеет смысла, если не задан B<WinHosts>. IP адрес для записи
+файла F<hosts>. По умолчанию равен I<127.0.0.1> .
+
+=back
+
+=head3 Директивы F<.vhost>
+
+=over
+
+=item B<Depth> I<n>
+
+Необязательно. Глубина дочернего дерева каталогов для анализа. По умолчанию
+берётся эффективное значение B<Depth> из родительской директории, уменьшенное
+на 1. При достижении нуля данная директория считается конечной директорией
+виртуального хоста. Если же значение больше 0, то анализ дерева директорий
+продолжается дальше вглубь на такое количество уровней.
+
+=item B<DirAlias> I<домен>
+
+Необязательно. Альтернативное имя директории для построение алиасов.
+По умолчанию: нет алиасов.
+
+=item B<DomainAlias> I<шаблон-домена>
+
+Необязательно. Шаблоны для алиасов всего домена целиком. По умолчанию:
+наследуется из родительской директории.
+
+=item B<Headers> I<шаблон>
+
+Необязательно. Шаблон дополнительных строк внутрь секции C<< <VirtualHost> >>.
+Предназначено для применения в шаблонах. По умолчанию: наследуется из
+родительской директории.
+
+=item B<HeadersReplace>
+
+Необязательно. Способ объединения шаблона B<Headers> с наследованным значением
+из родительской директории. Сейчас не реализовано и не используется, из-за чего
+новое значение B<Headers>, если задано, полностью заменяет наследованное
+значение.
+
+=item B<Name> I<метка>
+
+Необязательно. Имя данного поддомена. По умолчанию равно имени директории.
+I<Метка> (или имя директории, если B<Name> не задано) должна быть валидным
+именем поддомена (domain label): состоять только из маленьких латинских буков,
+цифр и дефиса, начинаться и заканчиваться только на букву или цифру (домен
+верхнего уровня не может начинаться на цифру).
+
+=item B<Port> I<n>
+
+Необязательно. Идентично B<Port> из F<.vhost.cfg> . По умолчанию: наследуется из
+родительской директории.
+
+=item B<Skip>
+
+Необязательно. Если данная директива указана с любым значением, даже C<UNDEF>,
+то данная директория не участвует в анализе и полностью игнорируется.
+
+=back
+
+=head2 Построение доменных имен
+
+Для начала рассмотрим простой случай, когда нигде не определены директивы
+B<Name>, B<DirAlias> и B<DomainAlias>. Глубина поиска B<Depth> равна 2 по
+умолчанию. Предположим, что в стартовой директории есть следующая структура
+каталогов:
+
+=over
+
+=item /foo
+
+=over
+
+=item /lorem
+
+=item /ipsum
+
+=item /dolor
+
+=back
+
+=item /bar
+
+=over
+
+=item /sit
+
+=item /amet
+
+=back
+
+=back
+
+Директории первого уровня станут доменами первого уровня, вложенные директории
+станут их поддоменами, и т.д. вглубь дерева. Так мы получим 5 виртуальных хостов
+со следующими именами (для каждой из директорий соответственно):
+
+=over
+
+=item lorem.foo
+
+=item ipsum.foo
+
+=item dolor.foo
+
+=item sit.bar
+
+=item amet.bar
+
+=back
+
+По умолчанию для построения доменных имен используются имена директорий.
+Директива B<Name> позволяет использовать другое имя вместо имени директории.
+
+Построение алиасов осуществляется с помощью двух директив:
+
+=over
+
+=item 1. Алиас директории B<DirAlias>
+
+=item 2. Алиас домена B<DomainAlias>
+
+=back
+
+Z<>
+
+=head3 Алиас директории B<DirAlias>
+
+Директива B<DirAlias> задаёт альтернативное имя для директории. При генерации
+доменных имен все алиасы директории будут использованы по очереди для генерации
+очередного полного доменного имени. Например:
+
+=over
+
+=item S</foo          C<DirAlias bar>>
+
+=over
+
+=item /lorem
+
+=item S</ipsum    C<DirAlias dolor>>
+
+=back
+
+=back
+
+На выходе будут сгенерированы два виртуальных хоста со следующими доменные
+именами и алиасами:
+
+=over
+
+=item I<lorem.foo> (алиасы: I<lorem.bar>)
+
+=item I<ipsum.foo> (алиасы: I<ipsum.bar>, I<dolor.foo>, I<dolor.bar>)
+
+=back
+
+Таким образом, сгенерированные имя и алиасы домена вместе составляют полный
+перебор всех возможных вариантов, составленных из имен и алиасов всех
+анализированных поддиректорий. Если бы в примере выше директория F</foo> имела
+2 алиаса S<(1 имя + 2 B<DirAlias>),> а директория F</foo/ipsum> имела 3 алиаса
+S<(1 имя + 3 B<DirAlias>),> то виртуальный хост в директории F</foo/ipsum> имел
+бы 11 полных алиасов S<(12 вариантов - 1 настоящее имя):>
+
+=over
+
+S<(1 + 2) * (1 + 3) = 12 = (1 + 11)>
+
+=back
+
+Z<>
+
+=head3 Алиас домена B<DomainAlias>
+
+Директива B<DomainAlias> добавляет целые доменные имена к уже рассмотренному
+выше списку алиасов. Однако есть следующие нюансы:
+
+=over
+
+=item * Директива B<DomainAlias> является массивом. Т.е. её значение делится по
+пробельным символам в список из отдельных алиасов домена.
+
+=item * Директива B<DomainAlias> является шаблоном. Каждый алиас из заданного в
+ней списка проходит через обработку шаблонов, причем для каждого готового имени
+полного перебора имен директорий и их B<DirAlias>'ов.
+
+=item * Все доменные имена, полученные из всех элементов B<DomainAlias>
+(разумеется, без дубликатов) в конце концов будут добавлены в список алиасов
+виртуального хоста.
+
+=back
+
+Например:
+
+=over
+
+=item S<< /foo          C<DirAlias bar> >>
+
+=over
+
+=item S<< /lorem    C<DirAlias ipsum>  и  C<DomainAlias *.{domain} {domain1}.ru example.com> >>
+
+=back
+
+=back
+
+Заметьте, что B<DomainAlias> состоит из 3 элементов: C<*.{domain}>,
+C<{domain1}.ru> и C<example.com>.
+
+Данная конфигурация создаст 1 виртуальный хост. Из имен директорий и их
+B<DirAlias>'ов будет сгенерировано 4 варианта имени.
+
+=over
+
+=item lorem.foo
+
+=item lorem.bar
+
+=item ipsum.foo
+
+=item ipsum.bar
+
+=back
+
+Для каждого из этих имен будут подставляться оба шаблон из B<DomainAlias>.
+Поэтому мы можем получить еще до 12 дополнительных алиасов (4 * 3):
+
+
+=over
+
+=item lorem.foo S<< Z<>  Z<> >> *.lorem.foo lorem.ru example.com
+
+=item lorem.bar S<< Z<>  Z<> >> *.lorem.bar lorem.ru example.com
+
+=item ipsum.foo S<< Z<>  Z<> >> *.ipsum.foo ipsum.ru example.com
+
+=item ipsum.bar S<< Z<>  Z<> >> *.ipsum.bar ipsum.ru example.com
+
+=back
+
+Однако, с учетом дублирования конечный список полных имен будет следующим:
+
+=over
+
+=item B<lorem.foo>S<< Z<>   <-- основное имя >>
+
+=item lorem.barS<< Z<>   <-- алиасы >>
+
+=item ipsum.foo
+
+=item ipsum.bar
+
+=item Z<>*.lorem.foo
+
+=item Z<>*.lorem.bar
+
+=item Z<>*.ipsum.foo
+
+=item Z<>*.ipsum.bar
+
+=item lorem.ru
+
+=item ipsum.ru
+
+=item example.com
+
+=back
+
+Z<>
+
+=head3 Символические ссылки
+
+Среди дерева директорий, которые анализирует B<vhostgen>, могут также
+встречаться и символические ссылки на директории. Такие ссылки обрабатываются
+особым образом.
+
+С одной стороны, ссылка на директорию проходится программой прозрачно, будто мы
+работаем с конечной директорией напрямую. Но с другой стороны, конечные
+директории виртуальных хостов в итоге группируются по их реальным абсолютным
+путям. Если на этапе анализа директорий программа смогла добраться до директорию
+виртуального хоста F</foo/bar/lol> тремя разными способами, то на выходе для неё
+будет создан один виртуальный хост.
+
+Каждая символическая ссылка на директорию расценивается, как B<DirAlias> для той
+директории, на которую ведёт ссылка. Например
+
+=over
+
+=item /foo
+
+=over
+
+=item /bar
+
+=item S<< ~lol  ->  ./bar >>
+
+=back
+
+=back
+
+Здесь символическая ссылка F</foo/lol> ведёт в директорию F</foo/bar>. На выходе
+будет создан один виртуальный хост для абсолютного пути F</foo/bar>, а имя
+ссылки F<lol> будет являться B<DirAlias>'ом для директории F</foo/bar>. Поэтому
+данный виртуальный хост будет иметь имя I<bar.foo> и алиас I<lol.foo> .
+
+Конечная директория, на которую ссылается символическая ссылка, не
+ограничивается никакими соотношениями со стартовой директорией, в которой
+выполняется работа программы.
+
+Независимо от прочих факторов, символическая ссылка всегда работает, как
+B<DirAlias>. Сколько угодно ссылок могут вести в одну и ту же директорию.
+
+B<Предостережение!> В текущей версии пока нет строгих проверок путей директорий,
+на которые ведут символические ссылки. Используйте на свой страх и риск!
+
+=head1 TEMPLATES
+
+Некоторые директивы содержат шаблоны и предназначены для генерации выходного
+файла конфигурации виртуальных хостов. В шаблонах могут выполняться подстановки
+предопределенных переменных и примитивных блоков условий.
+
+=over
+
+=item B<{>I<name>B<}>
+
+Подстановка значения переменной с именем I<name>. Допустимо указывать только
+предопределенные разрешенные имена переменных. Если указанная переменная имеет
+специальное значение C<UNDEF>, то и результат подстановки равен C<UNDEF>. Оно
+выводится, как пустая строка, но может быть использовано в блоке условия.
+
+Переменные, которые могут быть использованы для подстановки:
+
+=over
+
+=item B<alias>
+
+Строка со списком всех собранных алиасов домена, объединенных через пробел.
+Предназначено для C<ServerAlias>.
+
+=item B<cwd>
+
+Полный путь до стартовой директории.
+
+=item B<dir>I<N>
+
+Имя дочерней директории уровня I<N> от стартовой до текущей. Уровень считается
+от 0. См. также переменную B<subpath> ниже.
+
+=item B<domain>
+
+Полный домен текущего виртуального хоста. Предназначено для C<ServerName>.
+
+=item B<domain>I<N>
+
+Имя доменной метки уровня I<N>. Уровень считается от 0. Предназначено для
+использования в шаблоне домена B<DomainAlias>.
+
+=item B<extheaders>
+
+Вычисленное значение дополнительных заголовков из директив B<Headers> и
+B<HeadersReplace>. Предназначено для подстановки в шаблон виртаульного хоста
+B<VirtualHost>.
+
+=item B<path>
+
+Полный путь до текущей директории.
+
+=item B<port>
+
+Порт из директивы B<Port>.
+
+=item B<subpath>
+
+Часть пути от стартовой директории до текущей. Имеет вид F</foo/bar> . См. также
+переменную B<dir>I<N> выше.
+
+=item B<time>
+
+Текущее локальное время в формате C<YYYY-MM-DD HH:II:SS>. Логично в директиве
+B<BeginFile> генерировать служебный комментарий о том, что файл в принципе был
+сгенерирован автоматически. Временная метка может быть полезна там же.
+
+=item B<version>
+
+Имя и версия программы.
+
+=back
+
+Некоторые из указанных переменных могут не иметь особого смысла в тех или иных
+шаблонах.
+
+Помимо имени переменной также возможно следующие конструкции для подстановки
+соответствующих служебных символов:
+
+=over
+
+=item S<< B<{(}>    { >>
+
+=item S<< B<{)}>    } >>
+
+=item S<< B<{()}>   {} >>
+
+=item S<< B<{[}>    [ >>
+
+=item S<< B<{]}>    ] >>
+
+=item S<< B<{[]}>   [] >>
+
+=back
+
+Z<>
+
+=item B<[>I<шаблон>B<]>
+
+Примитивный условный блок. Вложенный шаблон может содержать как переменные, так
+и другие условные блоки. Если внутри не содержится ни подстановок переменных,
+ни условных блоков, то все содержимое блока всегда выводится, как есть.
+
+Если же вложенный шаблон содержит хотя бы одну подстановку переменной или другой
+условный блок, то весь блок будет выведен, только если хтя бы один из элементов
+имеен значение, отличное от специалного C<UNDEF>. Т.е. если все вложенные
+переменные и условия равны C<UNDEF>, то весь блок не будет выведен.
+
+=back
+
+=head1 AUTHORS
+
+Copyright (С) 2009-2012 Vovan-VE <vovan-ve@yandex.ru>
+
+=head1 HISTORY
+
+=over
+
+=item * 1.0 (2009) Была разработана на Delphi для Windows. Программа
+анализировала директории ровно в 2 уровня, имела файлы конфига программы и
+конфига директорий, умела генерировать файл F<hosts>.
+
+=item * 2.0 (2010-05) Была разработана на PHP. Основное нововведение: шаблоны
+виртуальных хостов.
+
+=item * 3.0 (2011-08) Разработана на Perl. Файлы конфигов стали более надежными
+и простыми, а шаблоны - более гибкими; появилась возможность генерации алиасов
+и контроль над глубиной анализа дерева каталогов.
+
+=back
+
+=cut
