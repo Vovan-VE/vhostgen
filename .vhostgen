@@ -639,7 +639,7 @@ sub applyConfig(\%\%$) {
 
 	$source &= VAR_SOURCE;
 
-	for my $name (keys $data) {
+	for my $name (keys %$data) {
 		# матюгаемся на директивы, которые не могут быть в этом типе конфига
 		($configVarName{$name} & $source)
 			or die "Option '$name' is not allowed in this file\n";
@@ -679,7 +679,7 @@ sub readConfig ($\%$) {
 sub mergeDirConfig(\%\%) {
 	my ($target, $add) = @_;
 
-	for my $name (keys $add) {
+	for my $name (keys %$add) {
 		(my $name_zero = $name) =~ s/\d+$/0/;
 		# свойства директивы
 		my $desc = $configVarName{$name_zero};
