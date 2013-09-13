@@ -1132,11 +1132,6 @@ sub isValidDomainLabel($$) {
 		for my $path (@host_index) {
 			$config = $hosts{$path};
 
-			$config->{extheaders} = ( $config->{headers}->isset() )
-				? $config->{headers}->get()
-				: undef
-			;
-
 			my @aliases = uniq( @{ $config->{aliases} } );
 			# first item will be the main domain name
 			# exclude it from aliases
@@ -1144,6 +1139,11 @@ sub isValidDomainLabel($$) {
 
 			$config->{alias} = (@aliases)
 				? join(' ', @aliases)
+				: undef
+			;
+
+			$config->{extheaders} = ( $config->{headers}->isset() )
+				? $config->{headers}->get()
 				: undef
 			;
 
