@@ -12,7 +12,7 @@ use File::Basename ();
 # имя программы и номер версии
 use constant {
 	VERSION_NAME   => 'VHostGen',
-	VERSION_NUMBER => '3.1.1',
+	VERSION_NUMBER => '3.1.2',
 };
 # полная подпись версии
 # имена конфиг-файлов
