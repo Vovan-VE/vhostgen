@@ -1244,9 +1244,9 @@ sub prepareResults() {
 	my $has_job;
 
 	# открываем выходные файлы
-	$has_job ||= ApacheConfOpen();
-	$has_job ||= nginxConfOpen();
-	$has_job ||= WinHostsOpen();
+	$has_job = 1 if ApacheConfOpen();
+	$has_job = 1 if nginxConfOpen();
+	$has_job = 1 if WinHostsOpen();
 
 	$has_job or die "Nothing to do - all outputs are disabled\n";
 
