@@ -7,15 +7,15 @@ icolor cyan            "^[[:space:]]*[a-z_].*$"
 ## имя несуществующей директивы - любое имя в начале строки (не считая пробелов), но существующие перекрашиваются далее
 icolor brightwhite,red "^[[:space:]]*[a-z_][a-z_0-9]*\>"
 ## boolean опции
-icolor blue            "^[[:space:]]*(skip|headersreplace|apacheoutput)\>"
+icolor blue            "^[[:space:]]*(skip|headersreplace|apacheoutput|nginx(headersreplace|output))\>"
 ## массив - фиолетовый
 icolor magenta         "^[[:space:]]*(diralias)\>"
 ## массив - фиолетовый; шаблон - яркий/жирный
 icolor brightmagenta   "^[[:space:]]*(domainalias)\>"
 ## строковые директивы
-icolor green           "^[[:space:]]*(port|depth|name|apacheconf|winhosts(ip)?)\>"
+icolor green           "^[[:space:]]*(port|depth|name|apacheconf|nginxconf|winhosts(ip)?)\>"
 ## строковые, шаблоны
-icolor brightgreen     "^[[:space:]]*(beginfile|endfile|virtualhost|headers)\>"
+icolor brightgreen     "^[[:space:]]*(beginfile|endfile|virtualhost|headers|nginx(beginfile|endfile|server|headers))\>"
 ## тело многострочного блока строки
 color  cyan            start="<<<<$" end="^>>>>$"
 ## границы блока строки
