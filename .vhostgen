@@ -88,6 +88,7 @@ my %configVarName = (
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
 
 	apacheconf  => VAR_SOURCE_GLOBAL,
+	apacheoff   => VAR_SOURCE_GLOBAL | VAR_EMPTY_VALUE,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	endfile     => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
@@ -123,6 +124,7 @@ my $config = {
 	port        => undef,
 	depth       => 2,
 	apacheconf  => './vhosts.conf',
+	apacheoff   => undef,
 	beginfile   => undef,
 	endfile     => undef,
 	virtualhost => undef,
@@ -1037,6 +1039,8 @@ sub mergeDirConfig(\%\%) {
 { my $ApacheFH;
 	# открытие файла за запись
 	sub ApacheConfOpen () {
+		return if defined $config->{apacheoff};
+
 		die "No value specified for ApacheConf\n"
 			unless defined $config->{apacheconf};
 
@@ -1049,11 +1053,15 @@ sub mergeDirConfig(\%\%) {
 
 	# запись текущего виртуального хоста по шаблону
 	sub ApacheConfVHost () {
+		return unless defined $ApacheFH;
+
 		print $ApacheFH "\n", $config->{virtualhost}->get();
 		1;
 	}
 
 	sub ApacheConfClose() {
+		return unless defined $ApacheFH;
+
 		print $ApacheFH $config->{endfile}->get();
 		close $ApacheFH;
 		undef $ApacheFH;
@@ -1182,9 +1190,14 @@ sub init () {
 }
 
 sub prepareResults() {
+	my $has_job;
+
 	# открываем выходные файлы
-	ApacheConfOpen();
-	WinHostsOpen();
+	$has_job ||= ApacheConfOpen();
+	$has_job ||= WinHostsOpen();
+
+	$has_job or die "Nothing to do - all outputs are disabled\n";
+
 	1;
 }
 
