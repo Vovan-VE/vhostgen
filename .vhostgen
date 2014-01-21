@@ -82,11 +82,12 @@ my %configVarName = (
 	cwd         => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 	version     => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 
-	apacheconf  => VAR_SOURCE_GLOBAL,
 	winhosts    => VAR_SOURCE_GLOBAL,
 	winhostsip  => VAR_SOURCE_GLOBAL,
 	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
+
+	apacheconf  => VAR_SOURCE_GLOBAL,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	endfile     => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
@@ -117,11 +118,11 @@ my $config = {
 	cwd         => undef,
 	time        => undef,
 	version     => VERSION,
-	apacheconf  => './vhosts.conf',
 	winhosts    => undef,
 	winhostsip  => '127.0.0.1',
 	port        => undef,
 	depth       => 2,
+	apacheconf  => './vhosts.conf',
 	beginfile   => undef,
 	endfile     => undef,
 	virtualhost => undef,
@@ -1177,10 +1178,13 @@ sub init () {
 	die qq[Config "$cfg": $@]
 		if $@;
 
+	1;
+}
+
+sub prepareResults() {
 	# открываем выходные файлы
 	ApacheConfOpen();
 	WinHostsOpen();
-	print "\n";
 	1;
 }
 
@@ -1477,6 +1481,8 @@ sub isValidDomainLabel($$) {
 }
 
 init();
+prepareResults();
+print "\n";
 domainDir();
 generateVhosts();
 finishResults();
