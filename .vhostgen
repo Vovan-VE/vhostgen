@@ -88,6 +88,7 @@ my %configVarName = (
 	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+	endfile     => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 
 	skip           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
@@ -122,6 +123,7 @@ my $config = {
 	port        => undef,
 	depth       => 2,
 	beginfile   => undef,
+	endfile     => undef,
 	virtualhost => undef,
 };
 
@@ -1049,6 +1051,13 @@ sub mergeDirConfig(\%\%) {
 		print $ApacheFH "\n", $config->{virtualhost}->get();
 		1;
 	}
+
+	sub ApacheConfClose() {
+		print $ApacheFH $config->{endfile}->get();
+		close $ApacheFH;
+		undef $ApacheFH;
+		1;
+	}
 }
 
 # функции генерации файла hosts
@@ -1173,6 +1182,10 @@ sub init () {
 	WinHostsOpen();
 	print "\n";
 	1;
+}
+
+sub finishResults() {
+	ApacheConfClose();
 }
 
 # стек конфигов при анализе директорий
@@ -1466,6 +1479,8 @@ sub isValidDomainLabel($$) {
 init();
 domainDir();
 generateVhosts();
+finishResults();
+
 1;
 __END__
 
@@ -1594,6 +1609,10 @@ C<UNDEF>, если не описано иное поведение данной 
 строк в самое начало выходного файл виртуальных хостов. Рекомендуется
 генерировать комментарий о том, что файл был сгенерирован автоматически. См.
 переменные шаблонов B<version> и B<time>.
+
+=item B<EndFile> I<шаблон>
+
+Необязательно. Шаблон подвала выходного файла.
 
 =item B<Depth> I<n>
 
