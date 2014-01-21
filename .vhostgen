@@ -333,6 +333,21 @@ my $config = {
 
 		my $start_pos = 0;
 
+		if ($code =~ /^ \{! (?<directive> [a-z0-9_]+ ) \} \n? /xi) {
+			my $directive = $+{directive};
+
+			$start_pos = length $&;
+
+			given ($directive) {
+				when ("v1") {
+					# данная версия шаблонов с [] и {}
+				}
+				default {
+					die "Unknown directive {!$directive}\n";
+				}
+			}
+		}
+
 		my $class   = ref($self) || $self;
 		my $items   = []; # текущие элемента шаблона
 		my $lastPos = $start_pos;
