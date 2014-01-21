@@ -347,10 +347,18 @@ my $config = {
 			#
 			## условный блок - шаблон в [] .
 			# cond      :: \[<template>\]
+			my $re_template = qr/
+				(?<text> [^\[\]{}]+ )
+				|
+				\{ (?<var> [^{}]* ) \}
+				|
+				(?<cond> [\[\]] )
+				|
+				(?<err> . )
+			/xs;
 
 			pos($code) = 0;
-			while ($code =~ /(?<text>[^\[\]{}]+)|\{(?<var>[^{}]*)\}|(?<cond>[\[\]])|(?<err>.)/sg)
-			{
+			while ($code =~ /$re_template/g) {
 				# позиция начала совпадения
 				$lastPos = $-[0];
 				# найденные элементы
