@@ -88,7 +88,7 @@ my %configVarName = (
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
 
 	apacheconf  => VAR_SOURCE_GLOBAL,
-	apacheoff   => VAR_SOURCE_GLOBAL | VAR_EMPTY_VALUE,
+	apacheoutput => VAR_SOURCE_GLOBAL,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	endfile     => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
@@ -124,7 +124,7 @@ my $config = {
 	port        => undef,
 	depth       => 2,
 	apacheconf  => './vhosts.conf',
-	apacheoff   => undef,
+	apacheoutput => 1,
 	beginfile   => undef,
 	endfile     => undef,
 	virtualhost => undef,
@@ -1039,7 +1039,7 @@ sub mergeDirConfig(\%\%) {
 { my $ApacheFH;
 	# открытие файла за запись
 	sub ApacheConfOpen () {
-		return if defined $config->{apacheoff};
+		return unless $config->{apacheoutput};
 
 		die "No value specified for ApacheConf\n"
 			unless defined $config->{apacheconf};
@@ -1472,12 +1472,15 @@ sub isValidDomainLabel($$) {
 				: undef
 			;
 
-			$config->{extheaders} = ( $config->{headers}->isset() )
-				? $config->{headers}->get()
-				: undef
-			;
+			if ($config->{apacheoutput}) {
+				$config->{extheaders} = ( $config->{headers}->isset() )
+					? $config->{headers}->get()
+					: undef
+				;
 
-			ApacheConfVHost();
+				ApacheConfVHost();
+			}
+
 			WinHostsAdd();
 
 			print "[+] $config->{domain}\t $config->{path}\n";
