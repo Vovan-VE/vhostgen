@@ -331,9 +331,11 @@ my $config = {
 	sub new($$$) {
 		my ($self, $code, $LinesBefore) = @_;
 
+		my $start_pos = 0;
+
 		my $class   = ref($self) || $self;
 		my $items   = []; # текущие элемента шаблона
-		my $lastPos = 0;
+		my $lastPos = $start_pos;
 		# стек родителььских шаблонов для обработки вложенных блоков условий
 		my @itemsStack;
 
@@ -360,7 +362,7 @@ my $config = {
 				(?<err> . )
 			/xs;
 
-			pos($code) = 0;
+			pos($code) = $start_pos;
 			while ($code =~ /$re_template/g) {
 				# позиция начала совпадения
 				$lastPos = $-[0];
