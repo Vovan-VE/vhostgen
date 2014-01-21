@@ -93,12 +93,20 @@ my %configVarName = (
 	endfile     => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 
+	nginxconf      => VAR_SOURCE_GLOBAL,
+	nginxoutput    => VAR_SOURCE_GLOBAL,
+	nginxbeginfile => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+	nginxendfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+	nginxserver    => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+
 	skip           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
 	name           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL,
 	diralias       => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_DATA_ARRAY,
 	domainalias    => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_DATA_ARRAY,
 	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
 	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
+	nginxheaders        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
+	nginxheadersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
 
 	dirs       => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
 	aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY | VAR_MERGE_TO_ALWAYS,
@@ -128,6 +136,12 @@ my $config = {
 	beginfile   => undef,
 	endfile     => undef,
 	virtualhost => undef,
+
+	nginxconf      => './nginx-servers.conf',
+	nginxoutput    => 0,
+	nginxbeginfile => undef,
+	nginxendfile   => undef,
+	nginxserver    => undef,
 };
 
 # родительский класс элемента шаблона
@@ -1069,6 +1083,40 @@ sub mergeDirConfig(\%\%) {
 	}
 }
 
+# функции записи конечного генерируемого конфига nginx
+{ my $nginx_fh;
+	# открытие файла за запись
+	sub nginxConfOpen () {
+		return unless $config->{nginxoutput};
+
+		die "No value specified for NginxConf\n"
+			unless defined $config->{nginxconf};
+
+		open $nginx_fh, ">", $config->{nginxconf}
+			or die qq[Unable to open NginxConf file "$config->{nginxconf}"\n];
+
+		print $nginx_fh $config->{nginxbeginfile}->get();
+		1;
+	}
+
+	# запись текущего сервера nginx по шаблону
+	sub nginxConfServer () {
+		return unless defined $nginx_fh;
+
+		print $nginx_fh "\n", $config->{nginxserver}->get();
+		1;
+	}
+
+	sub nginxConfClose() {
+		return unless defined $nginx_fh;
+
+		print $nginx_fh $config->{nginxendfile}->get();
+		close $nginx_fh;
+		undef $nginx_fh;
+		1;
+	}
+}
+
 # функции генерации файла hosts
 { my $WinHostsFH;
 	# открытие файла на запись, если он включен директивой
@@ -1194,6 +1242,7 @@ sub prepareResults() {
 
 	# открываем выходные файлы
 	$has_job ||= ApacheConfOpen();
+	$has_job ||= nginxConfOpen();
 	$has_job ||= WinHostsOpen();
 
 	$has_job or die "Nothing to do - all outputs are disabled\n";
@@ -1203,6 +1252,7 @@ sub prepareResults() {
 
 sub finishResults() {
 	ApacheConfClose();
+	nginxConfClose();
 }
 
 # стек конфигов при анализе директорий
@@ -1479,6 +1529,15 @@ sub isValidDomainLabel($$) {
 				;
 
 				ApacheConfVHost();
+			}
+
+			if ($config->{nginxoutput}) {
+				$config->{extheaders} = ( $config->{nginxheaders}->isset() )
+					? $config->{nginxheaders}->get()
+					: undef
+				;
+
+				nginxConfServer();
 			}
 
 			WinHostsAdd();
