@@ -322,6 +322,275 @@ my $config = {
 	1;
 }
 
+{ package VHostGen::Template::V2;
+	use base ('VHostGen::Template::Cond');
+	use Carp;
+
+	## шаблон - это сколько угодно элементов
+	# template    :: (<text> | <tag>)*
+	#
+	## простой текст - любые символы, кроме служебных {}
+	# text        :: [^{}]+
+	#
+	## тег - что-то в {}
+	# tag         ::= "{" <tag-content> "}"
+	#
+	## содержимое тега
+	# tag-content ::= <expr-tag> | <cond-block> | <quoted-text>
+	#
+	## тег-выражения
+	# expr-tag    ::= ":" <WS> <expr> <WS> ":"
+	#
+	## блок-условие
+	# cond-block  ::= "?" <template> "?"
+	#
+	## обрамленный plain текст
+	# quoted-text ::= "{{" <любой текст, кроме "}}}"> "}}"
+	#
+	## выражение
+	# expr        ::= <value> (<WS> <filter>)*
+	#
+	## исходное значение
+	# value       ::= <var> | <string>
+	#
+	##
+	# filter      ::= "|" <name>
+	#
+	## переменная
+	# var         ::= <name>
+	#
+	## строковый литерал
+	# string      ::= <'> <любые символы, кроме "'", с экранированием> <'>
+	#               | <"> <любые символы, кроме <">, с экранированием> <">
+	#
+	## имя
+	# name        ::= [a-z_][a-z_0-9]*
+	#
+	## пробельные символы необязательно сколько угодно
+	# WS         ::= \s*
+	#
+
+	my $RE_DEFINES = qr/
+		(?(DEFINE)
+			(?<name>
+				(?i)
+				[a-z_][a-z_0-9]*
+			)
+
+			(?<string>
+				" (?: [^"\\] | \\. )*+ "
+				|
+				' (?: [^'\\] | \\. )*+ '
+			)
+
+		)
+	/xs;
+
+	sub _parse_expr($) {
+		my ($expr) = @_;
+
+		my $re = qr/
+			$RE_DEFINES
+			^
+			(?:
+				(?<str> (?&string) )
+			|
+				(?<var> (?&name) )
+			)
+		/x;
+
+		$expr =~ /$re/
+			or confess "Unexpected mismatch in expression"
+		;
+
+		my $next_pos = length $&;
+
+		my $str = $+{str};
+		my $var = $+{var};
+
+		my $item;
+
+		if (defined $var) {
+			$item = VHostGen::Template::Var->new($var);
+		}
+		elsif (defined $str) {
+			$str = substr $str, 1, -1;
+			$str =~ s/\\(.)/$1/gs;
+			$item = VHostGen::Template::Text->new($str);
+		}
+		else {
+			confess "Unexpected behaviour, something is wrong";
+		}
+
+		pos($expr) = $next_pos;
+		while ($expr =~ /\G \s* \| (?<filter> [^\s|]++ ) /xg) {
+			my ($filter) = $+{filter};
+
+			warn "[debug] filters not implemented yet; parsed <$filter> in expr <$expr>";
+			...;
+		}
+
+		return $item;
+	}
+
+	# $code        - исходный текст шаблона
+	# $StartPos    - стартовая позиция внутри $code
+	# $LinesBefore - количество строк в файле, которые находятся перед нечалом шаблона
+	sub new($$$$) {
+		my ($self, $code, $StartPos, $LinesBefore) = @_;
+
+		my $class   = ref($self) || $self;
+		my $items   = []; # текущие элемента шаблона
+		my $lastPos = $StartPos;
+		# стек родительских шаблонов для обработки вложенных блоков условий
+		my @itemsStack;
+
+		# пытаемся парсить шаблон
+		eval {
+			my $re_template = qr/
+				$RE_DEFINES
+				(?(DEFINE)
+					# простой текст вокруг тегов
+					(?<out_text>
+						(?:
+							[^?{}]++
+						|
+							\?
+							(?! \} )
+						)+
+					)
+
+					(?<expr>
+						(?:
+							(?&string)
+						|
+							(?&name)
+						)
+						(?:
+							\s*+
+							\| (?&name)
+						)*
+					)
+
+					(?<qtext>
+						\{\{ (?! \{ )
+						.*?
+						\}\} (?= \} )
+					)
+				)
+
+				(?:
+					(?<text> (?&out_text) )
+				|
+					\{
+					(?:
+						(?:
+							(?<tag_text> (?&qtext) )
+						|
+							:
+							\s*+
+							(?<tag_expr> (?&expr) )
+							\s*+
+							:
+						)
+						\}
+					|
+						(?<cond_open> \? )
+					)
+				|
+					(?<cond_close> \?\} )
+				|
+					(?<err> . )
+				)
+			/xs;
+
+			pos($code) = $StartPos;
+			while ($code =~ /$re_template/g) {
+				# позиция начала совпадения
+				$lastPos = $-[0];
+				# найденные элементы
+				my $text       = $+{text};
+				my $tag_text   = $+{tag_text};
+				my $tag_expr   = $+{tag_expr};
+				my $cond_open  = $+{cond_open};
+				my $cond_close = $+{cond_close};
+				my $err        = $+{err};
+
+				# нашли что-то левое - ошибка
+				die "Invalid character '$err'\n"
+					if defined $err;
+
+				# конец условного блока "?}"
+				if (defined $cond_close) {
+					# внезапный конц несуществующего блока - ошибка
+					die "Unexpected '?}' without opening '{?'\n"
+						unless @itemsStack;
+
+					# из собранных элементов шаблона создаем новый элемент блока условия
+					# если, конечно, что-то насобирали
+					my $cond_item = VHostGen::Template::Cond->new($items)
+						if @$items;
+
+					# восстанавливаем родительский список элементов из стека
+					$items = pop @itemsStack;
+					# добвляем новый блок в этот список
+					push @$items, $cond_item
+						if $cond_item;
+				}
+				# начало условного блока "{?"
+				elsif (defined $cond_open) {
+					# текущие элементы в стек
+					push @itemsStack, $items;
+					# и начинаем класть вложенные элементы в новый список
+					$items = [];
+				}
+				# выражение {: expr :}
+				elsif (defined $tag_expr) {
+					# добавляем с список новый элемент переменной
+					push @$items, _parse_expr($tag_expr);
+				}
+				# текст {{{ text plain }}}
+				elsif (defined $tag_text) {
+					$tag_text =~ s/ ^ \{\{    / /x;
+					$tag_text =~ s/   \}\} \z / /x;
+
+					# добавляем с список новый элемент текста
+					push @$items, VHostGen::Template::Text->new($tag_text);
+				}
+				# простой текст
+				else {
+					# добавляем в список элементов новый текстовый элемент
+					push @$items, VHostGen::Template::Text->new($text);
+				}
+			}
+		};
+		# не удалось распарсить шаблон - выбрасываем ошибки с более подробной инфой
+		if ($@) {
+			chomp $@;
+			# пропарсенная часть шаблона от начала до места ошибки
+			my $start = substr($code, 0, $lastPos);
+			# человеческий номер строки внутри кода шаблона
+			my $line = 1 + ($start =~ tr/\n/\n/);
+			die "Template error: $@ at line " . ($LinesBefore + $line) . " (inner line $line, inner offset: $lastPos)\n";
+		}
+
+		# остались незакрытие блоки - ошибка в конце
+		die "Template error: Expected '?}' " . scalar(@itemsStack) . " times to close all unclosed '{?' at the end\n"
+			if @itemsStack;
+
+		# родительской конструктор
+		$class->SUPER::new($items);
+	}
+
+	# шаблон всегда динамичен (почему? забыл уже)
+	sub isvar($) { 0; }
+
+	# шаблон всегда определен
+	sub isset($) { 1; }
+
+	1;
+}
+
 # шаблон
 { package VHostGen::Template;
 	use base ('VHostGen::Template::Cond');
@@ -331,9 +600,29 @@ my $config = {
 	sub new($$$) {
 		my ($self, $code, $LinesBefore) = @_;
 
+		my $start_pos = 0;
+
+		if ($code =~ /^ \{! (?<directive> [a-z0-9_]+ ) \} \n? /xi) {
+			my $directive = $+{directive};
+
+			$start_pos = length $&;
+
+			given ($directive) {
+				when ("v1") {
+					# данная версия шаблонов с [] и {}
+				}
+				when ("v2") {
+					return VHostGen::Template::V2->new($code, $start_pos, $LinesBefore);
+				}
+				default {
+					die "Unknown directive {!$directive}\n";
+				}
+			}
+		}
+
 		my $class   = ref($self) || $self;
 		my $items   = []; # текущие элемента шаблона
-		my $lastPos = 0;
+		my $lastPos = $start_pos;
 		# стек родителььских шаблонов для обработки вложенных блоков условий
 		my @itemsStack;
 
@@ -360,7 +649,7 @@ my $config = {
 				(?<err> . )
 			/xs;
 
-			pos($code) = 0;
+			pos($code) = $start_pos;
 			while ($code =~ /$re_template/g) {
 				# позиция начала совпадения
 				$lastPos = $-[0];
