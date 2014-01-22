@@ -84,17 +84,18 @@ my %configVarName = (
 
 	winhosts    => VAR_SOURCE_GLOBAL,
 	winhostsip  => VAR_SOURCE_GLOBAL,
-	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
 
 	apacheconf  => VAR_SOURCE_GLOBAL,
 	apacheoutput => VAR_SOURCE_GLOBAL,
+	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	endfile     => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 
 	nginxconf      => VAR_SOURCE_GLOBAL,
 	nginxoutput    => VAR_SOURCE_GLOBAL,
+	nginxport      => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	nginxbeginfile => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	nginxendfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 	nginxserver    => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
@@ -129,16 +130,17 @@ my $config = {
 	version     => VERSION,
 	winhosts    => undef,
 	winhostsip  => '127.0.0.1',
-	port        => undef,
 	depth       => 2,
 	apacheconf  => './vhosts.conf',
 	apacheoutput => 1,
+	port        => undef,
 	beginfile   => undef,
 	endfile     => undef,
 	virtualhost => undef,
 
 	nginxconf      => './nginx-servers.conf',
 	nginxoutput    => 0,
+	nginxport      => undef,
 	nginxbeginfile => undef,
 	nginxendfile   => undef,
 	nginxserver    => undef,
@@ -1721,6 +1723,11 @@ nginx. Относительный путь вычисляется от стар�
 Необязательно. Нужно ли генерировать конфиг для nginx. По умолчанию для обратной
 совместимости равно I<0>, т.е. выключено.
 
+=item B<NginxPort> I<n>
+
+Необязательно. Номер порта для nginx. Предназначен для использования в шаблонах
+блока C<server{}>. По умолчанию: не задан.
+
 =item B<NginxBeginFile> I<шаблон>
 
 Необязательно. Шаблон заголовка выходного файла nginx. Предназначен для внесения
@@ -1815,6 +1822,11 @@ I<Метка> (или имя директории, если B<Name> не зад�
 из родительской директории. Сейчас не реализовано и не используется, из-за чего
 новое значение B<NginxHeaders>, если задано, полностью заменяет наследованное
 значение.
+
+=item B<NginxPort> I<n>
+
+Необязательно. Идентично B<NginxPort> из F<.vhost.cfg> . По умолчанию: наследуется из
+родительской директории.
 
 =item B<Port> I<n>
 
