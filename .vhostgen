@@ -86,6 +86,9 @@ my %configVarName = (
 	winhostsip  => VAR_SOURCE_GLOBAL,
 	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
+	docsubdir   => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_EMPTY_VALUE | VAR_TPL_ALLOW
+			| VAR_MERGE_TO_UNDEF
+	,
 
 	apacheconf  => VAR_SOURCE_GLOBAL,
 	apacheoutput => VAR_SOURCE_GLOBAL,
@@ -109,6 +112,7 @@ my %configVarName = (
 	domain     => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	domain0    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	alias      => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+	doc_root   => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
 	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 );
 
@@ -123,6 +127,7 @@ my $config = {
 	winhostsip  => '127.0.0.1',
 	port        => undef,
 	depth       => 2,
+	docsubdir   => '',
 	apacheconf  => './vhosts.conf',
 	apacheoutput => 1,
 	beginfile   => undef,
@@ -1363,6 +1368,10 @@ sub isValidDomainLabel($$) {
 	# кладем текущий конфиг в хеш виртуальных хостов по соответствующему пути
 	sub vhostDir() {
 		my $path = $config->{path};
+
+		warn qq[not a directory under {doc_root}: $config->{doc_root}]
+			unless -d $config->{doc_root};
+
 		# такой уже есть - слияние
 		if (exists $hosts{$path}) {
 			mergeDirConfig( %{ $hosts{$path} }, %$config );
@@ -1395,7 +1404,7 @@ sub isValidDomainLabel($$) {
 			my $path = $config->{cwd} . $config->{subpath};
 			$config->{path}    = Cwd::abs_path($path);
 
-			my $cfg = $config->{path} . '/' .  CONFIG_DIR_FILE;
+			my $cfg = $config->{path} . '/' . CONFIG_DIR_FILE;
 			eval {
 				readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
 			};
@@ -1435,6 +1444,11 @@ sub isValidDomainLabel($$) {
 					my @dir_aliases = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
 					push @names, \@dir_aliases;
 					push @namesCounts, scalar @dir_aliases;
+
+					$config->{doc_root} = $config->{path};
+					if ($config->{docsubdir}) {
+						$config->{doc_root} .= '/' . $config->{docsubdir};
+					}
 
 					if ($config->{depth} > 0) {
 						domainDir();
@@ -1648,6 +1662,11 @@ C<UNDEF>, если не описано иное поведение данной 
 
 Необязательно. Глубина дерева каталогов для анализа. По умолчанию: I<2>.
 
+=item B<DocSubdir> I<путь>
+
+Необязательно. Относительный путь к DocumentRoot внутри конечной директории
+виртуального хоста. По умолчанию: (пусто).
+
 =item B<Port> I<n>
 
 Необязательно. Номер порта. Предназначен для использования в шаблонах
@@ -1681,6 +1700,11 @@ C<UNDEF>, если не описано иное поведение данной 
 на 1. При достижении нуля данная директория считается конечной директорией
 виртуального хоста. Если же значение больше 0, то анализ дерева директорий
 продолжается дальше вглубь на такое количество уровней.
+
+=item B<DocSubdir> I<путь>
+
+Необязательно. Относительный путь к DocumentRoot внутри конечной директории
+виртуального хоста. По умолчанию: наследуется из родительской директории.
 
 =item B<DirAlias> I<домен>
 
@@ -2051,6 +2075,14 @@ B<{!>I<декларация>B<}>
 
 Имя дочерней директории уровня I<N> от стартовой до текущей. Уровень считается
 от 0. См. также переменную B<subpath> ниже.
+
+=item B<docsubdir>
+
+Значение директивы B<DocSubdir>.
+
+=item B<doc_root>
+
+Путь для C<DocumentRoot>. Построен из B<path> и B<docsubdir>.
 
 =item B<domain>
 

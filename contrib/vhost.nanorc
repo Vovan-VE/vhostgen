@@ -13,7 +13,7 @@ icolor magenta         "^[[:space:]]*(diralias)\>"
 ## массив - фиолетовый; шаблон - яркий/жирный
 icolor brightmagenta   "^[[:space:]]*(domainalias)\>"
 ## строковые директивы
-icolor green           "^[[:space:]]*(port|depth|name|apacheconf|winhosts(ip)?)\>"
+icolor green           "^[[:space:]]*(port|depth|name|apacheconf|winhosts(ip)?|docsubdir)\>"
 ## строковые, шаблоны
 icolor brightgreen     "^[[:space:]]*(beginfile|endfile|virtualhost|headers)\>"
 ## тело многострочного блока строки
