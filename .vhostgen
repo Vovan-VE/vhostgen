@@ -620,16 +620,14 @@ my $config = {
 
 			$start_pos = length $&;
 
-			given ($directive) {
-				when ("v1") {
-					# данная версия шаблонов с [] и {}
-				}
-				when ("v2") {
-					return VHostGen::Template::V2->new($code, $start_pos, $LinesBefore);
-				}
-				default {
-					die "Unknown directive {!$directive}\n";
-				}
+			if ("v1" eq $directive) {
+				# данная версия шаблонов с [] и {}
+			}
+			elsif ("v2" eq $directive) {
+				return VHostGen::Template::V2->new($code, $start_pos, $LinesBefore);
+			}
+			else {
+				die "Unknown directive {!$directive}\n";
 			}
 		}
 
