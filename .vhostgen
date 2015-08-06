@@ -14,947 +14,947 @@ use File::Basename ();
 
 # имя программы и номер версии
 use constant {
-	VERSION_NAME   => 'VHostGen',
-	VERSION_NUMBER => '3.1.2',
+    VERSION_NAME   => 'VHostGen',
+    VERSION_NUMBER => '3.1.2',
 };
 # полная подпись версии
 # имена конфиг-файлов
 use constant {
-	VERSION            => VERSION_NAME . '/' . VERSION_NUMBER,
-	CONFIGURATION_FILE => '.vhost.cfg',
-	CONFIG_DIR_FILE    => '.vhost',
+    VERSION            => VERSION_NAME . '/' . VERSION_NUMBER,
+    CONFIGURATION_FILE => '.vhost.cfg',
+    CONFIG_DIR_FILE    => '.vhost',
 };
 
 # битовые маски для описания переменных конфига
 use constant {
-	# источник переменной: флаги: 1, 2, 4, 8
-	VAR_SOURCE => 0xF,
-	VAR_SOURCE_PREDEF  => 0x0, # предопределенная
-	VAR_SOURCE_GLOBAL  => 0x1, # главный конфиг стартовой директории
-	VAR_SOURCE_PERDIR  => 0x2, # конфиг дочерних директорий
-	VAR_SOURCE_DYNAMIC => 0x4, # динамически генерируется
+    # источник переменной: флаги: 1, 2, 4, 8
+    VAR_SOURCE => 0xF,
+    VAR_SOURCE_PREDEF  => 0x0, # предопределенная
+    VAR_SOURCE_GLOBAL  => 0x1, # главный конфиг стартовой директории
+    VAR_SOURCE_PERDIR  => 0x2, # конфиг дочерних директорий
+    VAR_SOURCE_DYNAMIC => 0x4, # динамически генерируется
 
-	# область видимости: флаг
-	VAR_SCOPE => 0x10,
-	VAR_SCOPE_INHERIT => 0x00, # наследуется (по умолчанию)
-	VAR_SCOPE_LOCAL   => 0x10, # локальна в директории
+    # область видимости: флаг
+    VAR_SCOPE => 0x10,
+    VAR_SCOPE_INHERIT => 0x00, # наследуется (по умолчанию)
+    VAR_SCOPE_LOCAL   => 0x10, # локальна в директории
 
-	# тип данных: флаг
-	VAR_TYPE => 0x20,
-	VAR_TYPE_PLAINTEXT => 0x00, # простой текст (по умолчанию)
-	VAR_TYPE_TEMPLATE  => 0x20, # шаблон
+    # тип данных: флаг
+    VAR_TYPE => 0x20,
+    VAR_TYPE_PLAINTEXT => 0x00, # простой текст (по умолчанию)
+    VAR_TYPE_TEMPLATE  => 0x20, # шаблон
 
-	# смысл пустого значения: флаг
-	VAR_EMPTY => 0x40,
-	VAR_EMPTY_UNDEF => 0x00, # неопределенное значение UNDEF (по умолчанию)
-	VAR_EMPTY_VALUE => 0x40, # определенное пустое значение
+    # смысл пустого значения: флаг
+    VAR_EMPTY => 0x40,
+    VAR_EMPTY_UNDEF => 0x00, # неопределенное значение UNDEF (по умолчанию)
+    VAR_EMPTY_VALUE => 0x40, # определенное пустое значение
 
-	# скаляр или массив: флаг
-	VAR_DATA => 0x80,
-	VAR_DATA_SCALAR => 0x00, # скаляр (по умолчанию)
-	VAR_DATA_ARRAY  => 0x80, # список значений, разделенных пробелами
+    # скаляр или массив: флаг
+    VAR_DATA => 0x80,
+    VAR_DATA_SCALAR => 0x00, # скаляр (по умолчанию)
+    VAR_DATA_ARRAY  => 0x80, # список значений, разделенных пробелами
 
-	# использование в шаблонах: флаг
-	VAR_TPL => 0x100,
-	VAR_TPL_DENY  => 0x000, # запрещено (по умолчнию)
-	VAR_TPL_ALLOW => 0x100, # разрешено
+    # использование в шаблонах: флаг
+    VAR_TPL => 0x100,
+    VAR_TPL_DENY  => 0x000, # запрещено (по умолчнию)
+    VAR_TPL_ALLOW => 0x100, # разрешено
 
-	# обработка слияния конфигов одинакового приоритета: маска
-	VAR_MERGE => 0x1E00,
-	# слияние конфигов: поведение текущего конфига: перечисление
-	VAR_MERGE_TO => 0x600,
-	VAR_MERGE_TO_NEVER  => 0x000, # никогда не обновлять (по умолчанию)
-	VAR_MERGE_TO_UNDEF  => 0x200, # обновлять, если я не определено
-	VAR_MERGE_TO_EMPTY  => 0x400, # обновлять, если я не определено или пустое
-	VAR_MERGE_TO_ALWAYS => 0x600, # всегда обновлять
+    # обработка слияния конфигов одинакового приоритета: маска
+    VAR_MERGE => 0x1E00,
+    # слияние конфигов: поведение текущего конфига: перечисление
+    VAR_MERGE_TO => 0x600,
+    VAR_MERGE_TO_NEVER  => 0x000, # никогда не обновлять (по умолчанию)
+    VAR_MERGE_TO_UNDEF  => 0x200, # обновлять, если я не определено
+    VAR_MERGE_TO_EMPTY  => 0x400, # обновлять, если я не определено или пустое
+    VAR_MERGE_TO_ALWAYS => 0x600, # всегда обновлять
 
-	# слияние конфигов: обновлять из вливаемого конфига: перечисление
-	VAR_MERGE_FROM => 0x1800,
-	# зарезервировано
-	#VAR_MERGE_FROM_ALWAYS    => 0x0000, # всегда (по умолчанию)
-	#VAR_MERGE_FROM_NOT_EMPTY => 0x0800, # если оно определено и непустое
-	#VAR_MERGE_FROM_DEFINED   => 0x1000, # если оно определено (допускается пустое)
+    # слияние конфигов: обновлять из вливаемого конфига: перечисление
+    VAR_MERGE_FROM => 0x1800,
+    # зарезервировано
+    #VAR_MERGE_FROM_ALWAYS    => 0x0000, # всегда (по умолчанию)
+    #VAR_MERGE_FROM_NOT_EMPTY => 0x0800, # если оно определено и непустое
+    #VAR_MERGE_FROM_DEFINED   => 0x1000, # если оно определено (допускается пустое)
 };
 
 # переменные конфига со своиси свойствами
 my %configVarName = (
-	time        => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
-	cwd         => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
-	version     => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
+    time        => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
+    cwd         => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
+    version     => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 
-	winhosts    => VAR_SOURCE_GLOBAL,
-	winhostsip  => VAR_SOURCE_GLOBAL,
-	depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
-	docsubdir   => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_EMPTY_VALUE | VAR_TPL_ALLOW
-			| VAR_MERGE_TO_UNDEF
-	,
+    winhosts    => VAR_SOURCE_GLOBAL,
+    winhostsip  => VAR_SOURCE_GLOBAL,
+    depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
+    docsubdir   => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_EMPTY_VALUE | VAR_TPL_ALLOW
+            | VAR_MERGE_TO_UNDEF
+    ,
 
-	apacheconf  => VAR_SOURCE_GLOBAL,
-	apacheoutput => VAR_SOURCE_GLOBAL,
-	port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
-	beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
-	endfile     => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
-	virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+    apacheconf  => VAR_SOURCE_GLOBAL,
+    apacheoutput => VAR_SOURCE_GLOBAL,
+    port        => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
+    beginfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+    endfile     => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+    virtualhost => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 
-	nginxconf      => VAR_SOURCE_GLOBAL,
-	nginxoutput    => VAR_SOURCE_GLOBAL,
-	nginxport      => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
-	nginxbeginfile => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
-	nginxendfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
-	nginxserver    => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+    nginxconf      => VAR_SOURCE_GLOBAL,
+    nginxoutput    => VAR_SOURCE_GLOBAL,
+    nginxport      => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
+    nginxbeginfile => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+    nginxendfile   => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
+    nginxserver    => VAR_SOURCE_GLOBAL | VAR_TYPE_TEMPLATE,
 
-	skip           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
-	name           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL,
-	diralias       => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_DATA_ARRAY,
-	domainalias    => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_DATA_ARRAY,
-	headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
-	headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
-	nginxheaders        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
-	nginxheadersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
+    skip           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE,
+    name           => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL,
+    diralias       => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_DATA_ARRAY,
+    domainalias    => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_DATA_ARRAY,
+    headers        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
+    headersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
+    nginxheaders        => VAR_SOURCE_PERDIR | VAR_TYPE_TEMPLATE | VAR_MERGE_TO_UNDEF,
+    nginxheadersreplace => VAR_SOURCE_PERDIR | VAR_SCOPE_LOCAL | VAR_EMPTY_VALUE | VAR_MERGE_TO_UNDEF,
 
-	dirs       => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
-	aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY | VAR_MERGE_TO_ALWAYS,
+    dirs       => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY,
+    aliases    => VAR_SOURCE_DYNAMIC | VAR_DATA_ARRAY | VAR_MERGE_TO_ALWAYS,
 
-	path       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
-	dir0       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	domain     => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	domain0    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	alias      => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	doc_root   => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
-	extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
+    path       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+    subpath    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
+    dir0       => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+    domain     => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+    domain0    => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+    alias      => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+    doc_root   => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW,
+    extheaders => VAR_SOURCE_DYNAMIC | VAR_TPL_ALLOW | VAR_MERGE_TO_UNDEF,
 );
 
 # стартовая рабочая директория
 my ($cwd);
 # сам конфиг со значениями по умолчанию
 my $config = {
-	cwd         => undef,
-	time        => undef,
-	version     => VERSION,
-	winhosts    => undef,
-	winhostsip  => '127.0.0.1',
-	depth       => 2,
-	docsubdir   => '',
-	apacheconf  => './vhosts.conf',
-	apacheoutput => 1,
-	port        => undef,
-	beginfile   => undef,
-	endfile     => undef,
-	virtualhost => undef,
+    cwd         => undef,
+    time        => undef,
+    version     => VERSION,
+    winhosts    => undef,
+    winhostsip  => '127.0.0.1',
+    depth       => 2,
+    docsubdir   => '',
+    apacheconf  => './vhosts.conf',
+    apacheoutput => 1,
+    port        => undef,
+    beginfile   => undef,
+    endfile     => undef,
+    virtualhost => undef,
 
-	nginxconf      => './nginx-servers.conf',
-	nginxoutput    => 0,
-	nginxport      => undef,
-	nginxbeginfile => undef,
-	nginxendfile   => undef,
-	nginxserver    => undef,
+    nginxconf      => './nginx-servers.conf',
+    nginxoutput    => 0,
+    nginxport      => undef,
+    nginxbeginfile => undef,
+    nginxendfile   => undef,
+    nginxserver    => undef,
 };
 
 # родительский класс элемента шаблона
 { package VHostGen::Template::Item;
-	# конструктор
-	sub new($$) { }
-	# проверка: является ни переменной величиной
-	sub isvar($) { }
-	# проверка: определено ли
-	sub isset($) { }
-	# получение значения
-	sub get($) { }
-	1;
+    # конструктор
+    sub new($$) { }
+    # проверка: является ни переменной величиной
+    sub isvar($) { }
+    # проверка: определено ли
+    sub isset($) { }
+    # получение значения
+    sub get($) { }
+    1;
 }
 
 # константная текстовая часть шаблона
 { package VHostGen::Template::Text;
-	use base ('VHostGen::Template::Item');
-	use Carp;
+    use base ('VHostGen::Template::Item');
+    use Carp;
 
-	# $text - строка с текстом, который обозначает элемент
-	sub new($$) {
-		my ($self, $text) = @_;
+    # $text - строка с текстом, который обозначает элемент
+    sub new($$) {
+        my ($self, $text) = @_;
 
-		my $class = ref($self) || $self;
-		bless \$text, $class;
-	}
+        my $class = ref($self) || $self;
+        bless \$text, $class;
+    }
 
-	# всегда константно
-	sub isvar($) { 0; }
+    # всегда константно
+    sub isvar($) { 0; }
 
-	# всегда определено
-	sub isset($) { 1; }
+    # всегда определено
+    sub isset($) { 1; }
 
-	sub get($) {
-		my ($self) = @_;
+    sub get($) {
+        my ($self) = @_;
 
-		ref($self) or croak 'usage: $obj->get()';
-		my $v = $$self;
-		(defined $v) ? $v : '';
-	}
+        ref($self) or croak 'usage: $obj->get()';
+        my $v = $$self;
+        (defined $v) ? $v : '';
+    }
 
-	1;
+    1;
 }
 
 # подстановка переменной в шаблон
 { package VHostGen::Template::Var;
-	use base ('VHostGen::Template::Item');
-	use Carp;
+    use base ('VHostGen::Template::Item');
+    use Carp;
 
-	# предопределенные константные наборы символов
-	our %constant = (
-		''   => '',
-		'('  => '{',
-		')'  => '}',
-		'()' => '{}',
-		'['  => '[',
-		']'  => ']',
-		'[]' => '[]',
-	);
+    # предопределенные константные наборы символов
+    our %constant = (
+        ''   => '',
+        '('  => '{',
+        ')'  => '}',
+        '()' => '{}',
+        '['  => '[',
+        ']'  => ']',
+        '[]' => '[]',
+    );
 
-	# имена переменных (в ключах), разрешенных к использованию в шаблонах
-	our %allowed = map {
-		(VHostGen::VAR_TPL_ALLOW == ($configVarName{$_} & VHostGen::VAR_TPL))
-			? ($_ => 1)
-			: ()
-		;
-	} keys %configVarName;
+    # имена переменных (в ключах), разрешенных к использованию в шаблонах
+    our %allowed = map {
+        (VHostGen::VAR_TPL_ALLOW == ($configVarName{$_} & VHostGen::VAR_TPL))
+            ? ($_ => 1)
+            : ()
+        ;
+    } keys %configVarName;
 
-	# $name - имя содставляемой переменной или предопределенный набор символов
-	sub new($$) {
-		my ($self, $name) = @_;
+    # $name - имя содставляемой переменной или предопределенный набор символов
+    sub new($$) {
+        my ($self, $name) = @_;
 
-		my $class = ref($self) || $self;
-		$name = lc($name);
+        my $class = ref($self) || $self;
+        $name = lc($name);
 
-		# если предопределенный набор символов, то подменяем на текстовый узел
-		return VHostGen::Template::Text->new($constant{$name})
-			if exists $constant{$name};
+        # если предопределенный набор символов, то подменяем на текстовый узел
+        return VHostGen::Template::Text->new($constant{$name})
+            if exists $constant{$name};
 
-		(my $name_zero = $name) =~ s/\d+$/0/;
-		die qq[Unknown or disallowed variable "$name"\n]
-			unless exists $allowed{$name_zero};
+        (my $name_zero = $name) =~ s/\d+$/0/;
+        die qq[Unknown or disallowed variable "$name"\n]
+            unless exists $allowed{$name_zero};
 
-		bless \$name, $class;
-	}
+        bless \$name, $class;
+    }
 
-	# всегда динамично
-	sub isvar($) { 1; }
+    # всегда динамично
+    sub isvar($) { 1; }
 
-	# проверка: определено ли значение
-	sub isset($) {
-		my ($self) = @_;
+    # проверка: определено ли значение
+    sub isset($) {
+        my ($self) = @_;
 
-		ref($self) or croak 'usage: $obj->isset()';
-		defined $config->{$$self};
-	}
+        ref($self) or croak 'usage: $obj->isset()';
+        defined $config->{$$self};
+    }
 
-	sub get($) {
-		my ($self) = @_;
+    sub get($) {
+        my ($self) = @_;
 
-		ref($self) or croak 'usage: $obj->get()';
-		my $value = $config->{$$self};
-		# если не определено, то пустое значение
-		return '' unless defined $value;
+        ref($self) or croak 'usage: $obj->get()';
+        my $value = $config->{$$self};
+        # если не определено, то пустое значение
+        return '' unless defined $value;
 
-		# если простое скалярное значение, то возвращаем его
-		my $ref = ref $value;
-		return $value unless $ref;
+        # если простое скалярное значение, то возвращаем его
+        my $ref = ref $value;
+        return $value unless $ref;
 
-		# если список, то это список элементов шаблона
-		# склеиваем его через пробел
-		return join(
-			' ',
-			map {
-				( ref($_) && $_->isa('VHostGen::Template::Item') )
-					? $_->get()
-					: $_
-			} @{$value}
-		)
-			if $ref eq 'ARRAY';
+        # если список, то это список элементов шаблона
+        # склеиваем его через пробел
+        return join(
+            ' ',
+            map {
+                ( ref($_) && $_->isa('VHostGen::Template::Item') )
+                    ? $_->get()
+                    : $_
+            } @{$value}
+        )
+            if $ref eq 'ARRAY';
 
-		$value;
-	}
+        $value;
+    }
 
-	1;
+    1;
 }
 
 # условный блок в шаблоне
 { package VHostGen::Template::Cond;
-	use base ('VHostGen::Template::Item');
-	use Carp;
+    use base ('VHostGen::Template::Item');
+    use Carp;
 
-	# \@items - массив вложенных элементов шаблона
-	sub new($\@) {
-		my ($obj, $items) = @_;
+    # \@items - массив вложенных элементов шаблона
+    sub new($\@) {
+        my ($obj, $items) = @_;
 
-		my $class = ref($obj) || $obj;
-		my $self = {
-			# все элементы
-			items => $items,
-			# только динамические элементы
-			vars  => [],
-		};
-		# все элементы массива должны быть элементами шаблона
-		for my $item (@{$self->{items}}) {
-			ref($item) && $item->isa('VHostGen::Template::Item')
-				or croak "All array items must be an instance of VHostGen::Template::Item class";
+        my $class = ref($obj) || $obj;
+        my $self = {
+            # все элементы
+            items => $items,
+            # только динамические элементы
+            vars  => [],
+        };
+        # все элементы массива должны быть элементами шаблона
+        for my $item (@{$self->{items}}) {
+            ref($item) && $item->isa('VHostGen::Template::Item')
+                or croak "All array items must be an instance of VHostGen::Template::Item class";
 
-			push @{$self->{vars}}, $item
-				if $item->isvar();
-		}
-		# если нет динамических элементов, то подменяем на текстовый узел
-		return VHostGen::Template::Text->new(join( '', map {$_->get()} @{$self->{items}} ))
-			unless @{$self->{vars}};
+            push @{$self->{vars}}, $item
+                if $item->isvar();
+        }
+        # если нет динамических элементов, то подменяем на текстовый узел
+        return VHostGen::Template::Text->new(join( '', map {$_->get()} @{$self->{items}} ))
+            unless @{$self->{vars}};
 
-		bless $self, $class;
-	}
+        bless $self, $class;
+    }
 
-	# проверка динамичности
-	sub isvar($) {
-		my ($self) = @_;
+    # проверка динамичности
+    sub isvar($) {
+        my ($self) = @_;
 
-		ref($self) or croak 'usage: $obj->isvar()';
+        ref($self) or croak 'usage: $obj->isvar()';
 
-		# константно, если нет динамических элементов
-		return unless @{$self->{vars}};
+        # константно, если нет динамических элементов
+        return unless @{$self->{vars}};
 
-		1;
-	}
+        1;
+    }
 
-	# проверка: определено ли
-	sub isset($) {
-		my ($self) = @_;
+    # проверка: определено ли
+    sub isset($) {
+        my ($self) = @_;
 
-		ref($self) or croak 'usage: $obj->isset()';
+        ref($self) or croak 'usage: $obj->isset()';
 
-		# определено, если нет динамических элементов
-		return 1 unless @{$self->{vars}};
+        # определено, если нет динамических элементов
+        return 1 unless @{$self->{vars}};
 
-		# определено, если определен хотя бы 1 из динамических элементов
-		for my $var (@{$self->{vars}}) {
-			return 1 if $var->isset();
-		}
+        # определено, если определен хотя бы 1 из динамических элементов
+        for my $var (@{$self->{vars}}) {
+            return 1 if $var->isset();
+        }
 
-		# все динамические неопределены, значит и сам не определен
-		return;
-	}
+        # все динамические неопределены, значит и сам не определен
+        return;
+    }
 
-	sub get($) {
-		my ($self) = @_;
+    sub get($) {
+        my ($self) = @_;
 
-		ref($self) or croak 'usage: $obj->get()';
-		join( '', map { $_->isset() ? $_->get() : () } @{$self->{items}} );
-	}
+        ref($self) or croak 'usage: $obj->get()';
+        join( '', map { $_->isset() ? $_->get() : () } @{$self->{items}} );
+    }
 
-	1;
+    1;
 }
 
 { package VHostGen::Template::V2;
-	use base ('VHostGen::Template::Cond');
-	use Carp;
+    use base ('VHostGen::Template::Cond');
+    use Carp;
 
-	## шаблон - это сколько угодно элементов
-	# template    :: (<text> | <tag>)*
-	#
-	## простой текст - любые символы, кроме служебных {}
-	# text        :: [^{}]+
-	#
-	## тег - что-то в {}
-	# tag         ::= "{" <tag-content> "}"
-	#
-	## содержимое тега
-	# tag-content ::= <expr-tag> | <cond-block> | <quoted-text>
-	#
-	## тег-выражения
-	# expr-tag    ::= ":" <WS> <expr> <WS> ":"
-	#
-	## блок-условие
-	# cond-block  ::= "?" <template> "?"
-	#
-	## обрамленный plain текст
-	# quoted-text ::= "{{" <любой текст, кроме "}}}"> "}}"
-	#
-	## выражение
-	# expr        ::= <value> (<WS> <filter>)*
-	#
-	## исходное значение
-	# value       ::= <var> | <string>
-	#
-	##
-	# filter      ::= "|" <name>
-	#
-	## переменная
-	# var         ::= <name>
-	#
-	## строковый литерал
-	# string      ::= <'> <любые символы, кроме "'", с экранированием> <'>
-	#               | <"> <любые символы, кроме <">, с экранированием> <">
-	#
-	## имя
-	# name        ::= [a-z_][a-z_0-9]*
-	#
-	## пробельные символы необязательно сколько угодно
-	# WS         ::= \s*
-	#
+    ## шаблон - это сколько угодно элементов
+    # template    :: (<text> | <tag>)*
+    #
+    ## простой текст - любые символы, кроме служебных {}
+    # text        :: [^{}]+
+    #
+    ## тег - что-то в {}
+    # tag         ::= "{" <tag-content> "}"
+    #
+    ## содержимое тега
+    # tag-content ::= <expr-tag> | <cond-block> | <quoted-text>
+    #
+    ## тег-выражения
+    # expr-tag    ::= ":" <WS> <expr> <WS> ":"
+    #
+    ## блок-условие
+    # cond-block  ::= "?" <template> "?"
+    #
+    ## обрамленный plain текст
+    # quoted-text ::= "{{" <любой текст, кроме "}}}"> "}}"
+    #
+    ## выражение
+    # expr        ::= <value> (<WS> <filter>)*
+    #
+    ## исходное значение
+    # value       ::= <var> | <string>
+    #
+    ##
+    # filter      ::= "|" <name>
+    #
+    ## переменная
+    # var         ::= <name>
+    #
+    ## строковый литерал
+    # string      ::= <'> <любые символы, кроме "'", с экранированием> <'>
+    #               | <"> <любые символы, кроме <">, с экранированием> <">
+    #
+    ## имя
+    # name        ::= [a-z_][a-z_0-9]*
+    #
+    ## пробельные символы необязательно сколько угодно
+    # WS         ::= \s*
+    #
 
-	my $RE_DEFINES = qr/
-		(?(DEFINE)
-			(?<name>
-				(?i)
-				[a-z_][a-z_0-9]*
-			)
+    my $RE_DEFINES = qr/
+        (?(DEFINE)
+            (?<name>
+                (?i)
+                [a-z_][a-z_0-9]*
+            )
 
-			(?<string>
-				" (?: [^"\\] | \\. )*+ "
-				|
-				' (?: [^'\\] | \\. )*+ '
-			)
+            (?<string>
+                " (?: [^"\\] | \\. )*+ "
+                |
+                ' (?: [^'\\] | \\. )*+ '
+            )
 
-		)
-	/xs;
+        )
+    /xs;
 
-	sub _parse_expr($) {
-		my ($expr) = @_;
+    sub _parse_expr($) {
+        my ($expr) = @_;
 
-		my $re = qr/
-			$RE_DEFINES
-			^
-			(?:
-				(?<str> (?&string) )
-			|
-				(?<var> (?&name) )
-			)
-		/x;
+        my $re = qr/
+            $RE_DEFINES
+            ^
+            (?:
+                (?<str> (?&string) )
+            |
+                (?<var> (?&name) )
+            )
+        /x;
 
-		$expr =~ /$re/
-			or confess "Unexpected mismatch in expression"
-		;
+        $expr =~ /$re/
+            or confess "Unexpected mismatch in expression"
+        ;
 
-		my $next_pos = length $&;
+        my $next_pos = length $&;
 
-		my $str = $+{str};
-		my $var = $+{var};
+        my $str = $+{str};
+        my $var = $+{var};
 
-		my $item;
+        my $item;
 
-		if (defined $var) {
-			$item = VHostGen::Template::Var->new($var);
-		}
-		elsif (defined $str) {
-			$str = substr $str, 1, -1;
-			$str =~ s/\\(.)/$1/gs;
-			$item = VHostGen::Template::Text->new($str);
-		}
-		else {
-			confess "Unexpected behaviour, something is wrong";
-		}
+        if (defined $var) {
+            $item = VHostGen::Template::Var->new($var);
+        }
+        elsif (defined $str) {
+            $str = substr $str, 1, -1;
+            $str =~ s/\\(.)/$1/gs;
+            $item = VHostGen::Template::Text->new($str);
+        }
+        else {
+            confess "Unexpected behaviour, something is wrong";
+        }
 
-		pos($expr) = $next_pos;
-		while ($expr =~ /\G \s* \| (?<filter> [^\s|]++ ) /xg) {
-			my ($filter) = $+{filter};
+        pos($expr) = $next_pos;
+        while ($expr =~ /\G \s* \| (?<filter> [^\s|]++ ) /xg) {
+            my ($filter) = $+{filter};
 
-			warn "[debug] filters not implemented yet; parsed <$filter> in expr <$expr>";
-			...;
-		}
+            warn "[debug] filters not implemented yet; parsed <$filter> in expr <$expr>";
+            ...;
+        }
 
-		return $item;
-	}
+        return $item;
+    }
 
-	# $code        - исходный текст шаблона
-	# $StartPos    - стартовая позиция внутри $code
-	# $LinesBefore - количество строк в файле, которые находятся перед нечалом шаблона
-	sub new($$$$) {
-		my ($self, $code, $StartPos, $LinesBefore) = @_;
+    # $code        - исходный текст шаблона
+    # $StartPos    - стартовая позиция внутри $code
+    # $LinesBefore - количество строк в файле, которые находятся перед нечалом шаблона
+    sub new($$$$) {
+        my ($self, $code, $StartPos, $LinesBefore) = @_;
 
-		my $class   = ref($self) || $self;
-		my $items   = []; # текущие элемента шаблона
-		my $lastPos = $StartPos;
-		# стек родительских шаблонов для обработки вложенных блоков условий
-		my @itemsStack;
+        my $class   = ref($self) || $self;
+        my $items   = []; # текущие элемента шаблона
+        my $lastPos = $StartPos;
+        # стек родительских шаблонов для обработки вложенных блоков условий
+        my @itemsStack;
 
-		# пытаемся парсить шаблон
-		eval {
-			my $re_template = qr/
-				$RE_DEFINES
-				(?(DEFINE)
-					# простой текст вокруг тегов
-					(?<out_text>
-						(?:
-							[^?{]++
-						|
-							\?
-							(?! \} )
-						|
-							\{
-							(?! [{:?] )
-						)+
-					)
+        # пытаемся парсить шаблон
+        eval {
+            my $re_template = qr/
+                $RE_DEFINES
+                (?(DEFINE)
+                    # простой текст вокруг тегов
+                    (?<out_text>
+                        (?:
+                            [^?{]++
+                        |
+                            \?
+                            (?! \} )
+                        |
+                            \{
+                            (?! [{:?] )
+                        )+
+                    )
 
-					(?<expr>
-						(?:
-							(?&string)
-						|
-							(?&name)
-						)
-						(?:
-							\s*+
-							\| (?&name)
-						)*
-					)
+                    (?<expr>
+                        (?:
+                            (?&string)
+                        |
+                            (?&name)
+                        )
+                        (?:
+                            \s*+
+                            \| (?&name)
+                        )*
+                    )
 
-					(?<qtext>
-						\{\{ (?! \{ )
-						.*?
-						\}\} (?= \} )
-					)
-				)
+                    (?<qtext>
+                        \{\{ (?! \{ )
+                        .*?
+                        \}\} (?= \} )
+                    )
+                )
 
-				(?:
-					(?<text> (?&out_text) )
-				|
-					\{
-					(?:
-						(?:
-							(?<tag_text> (?&qtext) )
-						|
-							:
-							\s*+
-							(?<tag_expr> (?&expr) )
-							\s*+
-							:
-						)
-						\}
-					|
-						(?<cond_open> \? )
-					)
-				|
-					(?<cond_close> \?\} )
-				|
-					(?<err> . )
-				)
-			/xs;
+                (?:
+                    (?<text> (?&out_text) )
+                |
+                    \{
+                    (?:
+                        (?:
+                            (?<tag_text> (?&qtext) )
+                        |
+                            :
+                            \s*+
+                            (?<tag_expr> (?&expr) )
+                            \s*+
+                            :
+                        )
+                        \}
+                    |
+                        (?<cond_open> \? )
+                    )
+                |
+                    (?<cond_close> \?\} )
+                |
+                    (?<err> . )
+                )
+            /xs;
 
-			pos($code) = $StartPos;
-			while ($code =~ /$re_template/g) {
-				# позиция начала совпадения
-				$lastPos = $-[0];
-				# найденные элементы
-				my $text       = $+{text};
-				my $tag_text   = $+{tag_text};
-				my $tag_expr   = $+{tag_expr};
-				my $cond_open  = $+{cond_open};
-				my $cond_close = $+{cond_close};
-				my $err        = $+{err};
+            pos($code) = $StartPos;
+            while ($code =~ /$re_template/g) {
+                # позиция начала совпадения
+                $lastPos = $-[0];
+                # найденные элементы
+                my $text       = $+{text};
+                my $tag_text   = $+{tag_text};
+                my $tag_expr   = $+{tag_expr};
+                my $cond_open  = $+{cond_open};
+                my $cond_close = $+{cond_close};
+                my $err        = $+{err};
 
-				# нашли что-то левое - ошибка
-				die "Invalid character '$err'\n"
-					if defined $err;
+                # нашли что-то левое - ошибка
+                die "Invalid character '$err'\n"
+                    if defined $err;
 
-				# конец условного блока "?}"
-				if (defined $cond_close) {
-					# внезапный конц несуществующего блока - ошибка
-					die "Unexpected '?}' without opening '{?'\n"
-						unless @itemsStack;
+                # конец условного блока "?}"
+                if (defined $cond_close) {
+                    # внезапный конц несуществующего блока - ошибка
+                    die "Unexpected '?}' without opening '{?'\n"
+                        unless @itemsStack;
 
-					# из собранных элементов шаблона создаем новый элемент блока условия
-					# если, конечно, что-то насобирали
-					my $cond_item = VHostGen::Template::Cond->new($items)
-						if @$items;
+                    # из собранных элементов шаблона создаем новый элемент блока условия
+                    # если, конечно, что-то насобирали
+                    my $cond_item = VHostGen::Template::Cond->new($items)
+                        if @$items;
 
-					# восстанавливаем родительский список элементов из стека
-					$items = pop @itemsStack;
-					# добвляем новый блок в этот список
-					push @$items, $cond_item
-						if $cond_item;
-				}
-				# начало условного блока "{?"
-				elsif (defined $cond_open) {
-					# текущие элементы в стек
-					push @itemsStack, $items;
-					# и начинаем класть вложенные элементы в новый список
-					$items = [];
-				}
-				# выражение {: expr :}
-				elsif (defined $tag_expr) {
-					# добавляем с список новый элемент переменной
-					push @$items, _parse_expr($tag_expr);
-				}
-				# текст {{{ text plain }}}
-				elsif (defined $tag_text) {
-					$tag_text =~ s/ ^ \{\{    / /x;
-					$tag_text =~ s/   \}\} \z / /x;
+                    # восстанавливаем родительский список элементов из стека
+                    $items = pop @itemsStack;
+                    # добвляем новый блок в этот список
+                    push @$items, $cond_item
+                        if $cond_item;
+                }
+                # начало условного блока "{?"
+                elsif (defined $cond_open) {
+                    # текущие элементы в стек
+                    push @itemsStack, $items;
+                    # и начинаем класть вложенные элементы в новый список
+                    $items = [];
+                }
+                # выражение {: expr :}
+                elsif (defined $tag_expr) {
+                    # добавляем с список новый элемент переменной
+                    push @$items, _parse_expr($tag_expr);
+                }
+                # текст {{{ text plain }}}
+                elsif (defined $tag_text) {
+                    $tag_text =~ s/ ^ \{\{    / /x;
+                    $tag_text =~ s/   \}\} \z / /x;
 
-					# добавляем с список новый элемент текста
-					push @$items, VHostGen::Template::Text->new($tag_text);
-				}
-				# простой текст
-				else {
-					# добавляем в список элементов новый текстовый элемент
-					push @$items, VHostGen::Template::Text->new($text);
-				}
-			}
-		};
-		# не удалось распарсить шаблон - выбрасываем ошибки с более подробной инфой
-		if ($@) {
-			chomp $@;
-			# пропарсенная часть шаблона от начала до места ошибки
-			my $start = substr($code, 0, $lastPos);
-			# человеческий номер строки внутри кода шаблона
-			my $line = 1 + ($start =~ tr/\n/\n/);
-			die "Template error: $@ at line " . ($LinesBefore + $line) . " (inner line $line, inner offset: $lastPos)\n";
-		}
+                    # добавляем с список новый элемент текста
+                    push @$items, VHostGen::Template::Text->new($tag_text);
+                }
+                # простой текст
+                else {
+                    # добавляем в список элементов новый текстовый элемент
+                    push @$items, VHostGen::Template::Text->new($text);
+                }
+            }
+        };
+        # не удалось распарсить шаблон - выбрасываем ошибки с более подробной инфой
+        if ($@) {
+            chomp $@;
+            # пропарсенная часть шаблона от начала до места ошибки
+            my $start = substr($code, 0, $lastPos);
+            # человеческий номер строки внутри кода шаблона
+            my $line = 1 + ($start =~ tr/\n/\n/);
+            die "Template error: $@ at line " . ($LinesBefore + $line) . " (inner line $line, inner offset: $lastPos)\n";
+        }
 
-		# остались незакрытие блоки - ошибка в конце
-		die "Template error: Expected '?}' " . scalar(@itemsStack) . " times to close all unclosed '{?' at the end\n"
-			if @itemsStack;
+        # остались незакрытие блоки - ошибка в конце
+        die "Template error: Expected '?}' " . scalar(@itemsStack) . " times to close all unclosed '{?' at the end\n"
+            if @itemsStack;
 
-		# родительской конструктор
-		$class->SUPER::new($items);
-	}
+        # родительской конструктор
+        $class->SUPER::new($items);
+    }
 
-	# шаблон всегда динамичен (почему? забыл уже)
-	sub isvar($) { 0; }
+    # шаблон всегда динамичен (почему? забыл уже)
+    sub isvar($) { 0; }
 
-	# шаблон всегда определен
-	sub isset($) { 1; }
+    # шаблон всегда определен
+    sub isset($) { 1; }
 
-	1;
+    1;
 }
 
 # шаблон
 { package VHostGen::Template;
-	use base ('VHostGen::Template::Cond');
+    use base ('VHostGen::Template::Cond');
 
-	# $code        - исходный текст шаблона
-	# $LinesBefore - количество строк в файле, которые находятся перед нечалом шаблона
-	sub new($$$) {
-		my ($self, $code, $LinesBefore) = @_;
+    # $code        - исходный текст шаблона
+    # $LinesBefore - количество строк в файле, которые находятся перед нечалом шаблона
+    sub new($$$) {
+        my ($self, $code, $LinesBefore) = @_;
 
-		my $start_pos = 0;
+        my $start_pos = 0;
 
-		if ($code =~ /^ \{! (?<directive> [a-z0-9_]+ ) \} \n? /xi) {
-			my $directive = $+{directive};
+        if ($code =~ /^ \{! (?<directive> [a-z0-9_]+ ) \} \n? /xi) {
+            my $directive = $+{directive};
 
-			$start_pos = length $&;
+            $start_pos = length $&;
 
-			if ("v1" eq $directive) {
-				# данная версия шаблонов с [] и {}
-			}
-			elsif ("v2" eq $directive) {
-				return VHostGen::Template::V2->new($code, $start_pos, $LinesBefore);
-			}
-			else {
-				die "Unknown directive {!$directive}\n";
-			}
-		}
+            if ("v1" eq $directive) {
+                # данная версия шаблонов с [] и {}
+            }
+            elsif ("v2" eq $directive) {
+                return VHostGen::Template::V2->new($code, $start_pos, $LinesBefore);
+            }
+            else {
+                die "Unknown directive {!$directive}\n";
+            }
+        }
 
-		my $class   = ref($self) || $self;
-		my $items   = []; # текущие элемента шаблона
-		my $lastPos = $start_pos;
-		# стек родителььских шаблонов для обработки вложенных блоков условий
-		my @itemsStack;
+        my $class   = ref($self) || $self;
+        my $items   = []; # текущие элемента шаблона
+        my $lastPos = $start_pos;
+        # стек родителььских шаблонов для обработки вложенных блоков условий
+        my @itemsStack;
 
-		# пытаемся парсить шаблон
-		eval {
-			## шаблон - это сколько угодно элементов
-			# template  :: (<text> | <var> | <cond>)*
-			#
-			## простой текст - любые символы, кроме служебных [] и {} .
-			# text      :: [^\[\]{}]+
-			#
-			## переменная - что-то в {} .
-			# var       :: \{[^{}]+\}
-			#
-			## условный блок - шаблон в [] .
-			# cond      :: \[<template>\]
-			my $re_template = qr/
-				(?<text> [^\[\]{}]+ )
-				|
-				\{ (?<var> [^{}]* ) \}
-				|
-				(?<cond> [\[\]] )
-				|
-				(?<err> . )
-			/xs;
+        # пытаемся парсить шаблон
+        eval {
+            ## шаблон - это сколько угодно элементов
+            # template  :: (<text> | <var> | <cond>)*
+            #
+            ## простой текст - любые символы, кроме служебных [] и {} .
+            # text      :: [^\[\]{}]+
+            #
+            ## переменная - что-то в {} .
+            # var       :: \{[^{}]+\}
+            #
+            ## условный блок - шаблон в [] .
+            # cond      :: \[<template>\]
+            my $re_template = qr/
+                (?<text> [^\[\]{}]+ )
+                |
+                \{ (?<var> [^{}]* ) \}
+                |
+                (?<cond> [\[\]] )
+                |
+                (?<err> . )
+            /xs;
 
-			pos($code) = $start_pos;
-			while ($code =~ /$re_template/g) {
-				# позиция начала совпадения
-				$lastPos = $-[0];
-				# найденные элементы
-				my ($text, $var, $cond, $err) = @+{ qw(text var cond err) };
+            pos($code) = $start_pos;
+            while ($code =~ /$re_template/g) {
+                # позиция начала совпадения
+                $lastPos = $-[0];
+                # найденные элементы
+                my ($text, $var, $cond, $err) = @+{ qw(text var cond err) };
 
-				# нашли что-то левое - ошибка
-				die "Invalid character '$err'\n"
-					if defined $err;
+                # нашли что-то левое - ошибка
+                die "Invalid character '$err'\n"
+                    if defined $err;
 
-				# граница условного блока: "[" или "]"
-				if (defined $cond) {
-					# начало "["
-					if ($cond eq '[') {
-						# текущие элементы в стек
-						push @itemsStack, $items;
-						# и начинаем класть вложенные элементы в новый список
-						$items = [];
-					}
-					# конец "]"
-					else {
-						# внезапный конц несуществующего блока - ошибка
-						die "Unexpected ']' without opening '['\n"
-							unless @itemsStack;
+                # граница условного блока: "[" или "]"
+                if (defined $cond) {
+                    # начало "["
+                    if ($cond eq '[') {
+                        # текущие элементы в стек
+                        push @itemsStack, $items;
+                        # и начинаем класть вложенные элементы в новый список
+                        $items = [];
+                    }
+                    # конец "]"
+                    else {
+                        # внезапный конц несуществующего блока - ошибка
+                        die "Unexpected ']' without opening '['\n"
+                            unless @itemsStack;
 
-						# из собранных элементов шаблона создаем новый элемент блока условия
-						# если, конечно, что-то насобирали
-						my $cond_item = VHostGen::Template::Cond->new($items)
-							if @$items;
+                        # из собранных элементов шаблона создаем новый элемент блока условия
+                        # если, конечно, что-то насобирали
+                        my $cond_item = VHostGen::Template::Cond->new($items)
+                            if @$items;
 
-						# восстанавливаем родительский список элементов из стека
-						$items = pop @itemsStack;
-						# добвляем новый блок в этот список
-						push @$items, $cond_item
-							if $cond_item;
-					}
-				}
-				# переменная {var}
-				elsif (defined $var) {
-					# добавляем с список новый элемент переменной
-					push @$items, VHostGen::Template::Var->new($var);
-				}
-				# простой текст
-				else {
-					# добавляем в список элементов новый текстовый элемент
-					push @$items, VHostGen::Template::Text->new($text);
-				}
-			}
-		};
-		# не удалось распарсить шаблон - выбрасываем ошибки с более подробной инфой
-		if ($@) {
-			chomp $@;
-			# пропарсенная часть шаблона от начала до места ошибки
-			my $start = substr($code, 0, $lastPos);
-			# человеческий номер строки внутри кода шаблона
-			my $line = 1 + ($start =~ tr/\n/\n/);
-			die "Template error: $@ at line " . ($LinesBefore + $line) . " (inner line $line, inner offset: $lastPos)\n";
-		}
+                        # восстанавливаем родительский список элементов из стека
+                        $items = pop @itemsStack;
+                        # добвляем новый блок в этот список
+                        push @$items, $cond_item
+                            if $cond_item;
+                    }
+                }
+                # переменная {var}
+                elsif (defined $var) {
+                    # добавляем с список новый элемент переменной
+                    push @$items, VHostGen::Template::Var->new($var);
+                }
+                # простой текст
+                else {
+                    # добавляем в список элементов новый текстовый элемент
+                    push @$items, VHostGen::Template::Text->new($text);
+                }
+            }
+        };
+        # не удалось распарсить шаблон - выбрасываем ошибки с более подробной инфой
+        if ($@) {
+            chomp $@;
+            # пропарсенная часть шаблона от начала до места ошибки
+            my $start = substr($code, 0, $lastPos);
+            # человеческий номер строки внутри кода шаблона
+            my $line = 1 + ($start =~ tr/\n/\n/);
+            die "Template error: $@ at line " . ($LinesBefore + $line) . " (inner line $line, inner offset: $lastPos)\n";
+        }
 
-		# остались незакрытие блоки - ошибка в конце
-		die "Template error: Expected ']' " . scalar(@itemsStack) . " times to close all unclosed '[' at the end\n"
-			if @itemsStack;
+        # остались незакрытие блоки - ошибка в конце
+        die "Template error: Expected ']' " . scalar(@itemsStack) . " times to close all unclosed '[' at the end\n"
+            if @itemsStack;
 
-		# родительской конструктор
-		$class->SUPER::new($items);
-	}
+        # родительской конструктор
+        $class->SUPER::new($items);
+    }
 
-	# конструктор пустого шаблона
-	sub newEmpty($) {
-		my ($self) = @_;
+    # конструктор пустого шаблона
+    sub newEmpty($) {
+        my ($self) = @_;
 
-		my $class = ref($self) || $self;
-		$class->SUPER::new([]);
-	}
+        my $class = ref($self) || $self;
+        $class->SUPER::new([]);
+    }
 
-	# шаблон всегда динамичен (почему? забыл уже)
-	sub isvar($) { 0; }
+    # шаблон всегда динамичен (почему? забыл уже)
+    sub isvar($) { 0; }
 
-	# шаблон всегда определен
-	sub isset($) { 1; }
+    # шаблон всегда определен
+    sub isset($) { 1; }
 
-	1;
+    1;
 }
 
 # получение уникальных элементов списка с сохранением порядка следования
 sub uniq(@) {
-	my %seen;
-	grep { ! $seen{$_}++ } @_;
+    my %seen;
+    grep { ! $seen{$_}++ } @_;
 }
 
 # некое подобие пула конфигов
 { my (%loaded_configs);
-	# загрузка конфига из файла
-	# $filename - имя файла конфига
-	sub loadConfig($) {
-		my ($filename) = @_;
+    # загрузка конфига из файла
+    # $filename - имя файла конфига
+    sub loadConfig($) {
+        my ($filename) = @_;
 
-		my $config = {};
+        my $config = {};
 
-		# файл конфига существует?
-		if (-e $filename) {
-			# содержимое файла
-			my $data;
-			# чтение файла
-			{
-				local $/;
-				open(my $h, '<', $filename)
-					or die "Unable to read configuration file $filename\n";
+        # файл конфига существует?
+        if (-e $filename) {
+            # содержимое файла
+            my $data;
+            # чтение файла
+            {
+                local $/;
+                open(my $h, '<', $filename)
+                    or die "Unable to read configuration file $filename\n";
 
-				$data = <$h>;
-				close $h;
-			}
-			# заменяем CRLF и CR на LF
-			$data =~ s/\r\n?/\n/g;
+                $data = <$h>;
+                close $h;
+            }
+            # заменяем CRLF и CR на LF
+            $data =~ s/\r\n?/\n/g;
 
-			pos($data) = 0;
-			my $line = 1;
-			# парсим конфиг по синтаксическим строкам
-			# (многострочное значение парсим залпом, как одну строку)
-			while ($data =~ /
-					# начало строки
-					^
-					# пропускаем горизонтальные пробелы в начале
-					\h*
-					# затем необязательно что-то из этого:
-					(?:
-						# комментарий
-						\#.*
-					|
-						# директива
-						# имя директивы
-						(?<name>
-							[a-z_][a-z_0-9]*
-						)
-						# затем опционально
-						(?:
-							# горизонтальные пробельные символы
-							\h+
-							# затем что-то из этого:
-							(?:
-								# маркер начала многострочного значения
-								(?<ml>
-									<<<<\n
-								)
-								# необязателное содержимое многострочногоблока значения
-								(?:
-									# захватываем само значение
-									(?<mlv>
-										# каждая строка внутри, хоты бя одна строка
-										(?:
-											# необязательно переход на новую строку после предыдущей
-											\n?
-											# начало строки
-											^
-											# но чтобы далее не было маркера конца
-											(?!
-												>>>>$
-											)
-											# содержимое строки
-											.*+
-										)*+
-									)
-									# новая строка за последней строкой тела - не входит в значение
-									\n
-								)??
-								# маркер конца блока
-								>>>>$
-							|
-								# простое однострочное значение
-								(?<iv> .* )
-							)
-						)?
-					|
-						# что-то другое невалидное
-						(?<invalid> .+ )
-					)?
-					# конец строки
-					$
-				/gmxi)
-			{
-				# собранные элементы
-				my ($name, $multiline, $multiline_value, $inline_value, $invalid) =
-					@+{ qw(name ml mlv iv invalid) };
+            pos($data) = 0;
+            my $line = 1;
+            # парсим конфиг по синтаксическим строкам
+            # (многострочное значение парсим залпом, как одну строку)
+            while ($data =~ /
+                    # начало строки
+                    ^
+                    # пропускаем горизонтальные пробелы в начале
+                    \h*
+                    # затем необязательно что-то из этого:
+                    (?:
+                        # комментарий
+                        \#.*
+                    |
+                        # директива
+                        # имя директивы
+                        (?<name>
+                            [a-z_][a-z_0-9]*
+                        )
+                        # затем опционально
+                        (?:
+                            # горизонтальные пробельные символы
+                            \h+
+                            # затем что-то из этого:
+                            (?:
+                                # маркер начала многострочного значения
+                                (?<ml>
+                                    <<<<\n
+                                )
+                                # необязателное содержимое многострочногоблока значения
+                                (?:
+                                    # захватываем само значение
+                                    (?<mlv>
+                                        # каждая строка внутри, хоты бя одна строка
+                                        (?:
+                                            # необязательно переход на новую строку после предыдущей
+                                            \n?
+                                            # начало строки
+                                            ^
+                                            # но чтобы далее не было маркера конца
+                                            (?!
+                                                >>>>$
+                                            )
+                                            # содержимое строки
+                                            .*+
+                                        )*+
+                                    )
+                                    # новая строка за последней строкой тела - не входит в значение
+                                    \n
+                                )??
+                                # маркер конца блока
+                                >>>>$
+                            |
+                                # простое однострочное значение
+                                (?<iv> .* )
+                            )
+                        )?
+                    |
+                        # что-то другое невалидное
+                        (?<invalid> .+ )
+                    )?
+                    # конец строки
+                    $
+                /gmxi)
+            {
+                # собранные элементы
+                my ($name, $multiline, $multiline_value, $inline_value, $invalid) =
+                    @+{ qw(name ml mlv iv invalid) };
 
-				# нашли что-то невалидное - ошибка
-				die "Unknown character '" . substr($invalid, 0, 1) . "' at line $line\n"
-					if defined $invalid;
+                # нашли что-то невалидное - ошибка
+                die "Unknown character '" . substr($invalid, 0, 1) . "' at line $line\n"
+                    if defined $invalid;
 
-				# директива
-				if (defined $name) {
-					my ($name_lower, $value, $start_line) = (lc $name, '', $line);
-					(my $name_lower_zero = $name_lower) =~ s/\d+$/0/;
-					# аесть такая директива вообще?
-					exists $configVarName{$name_lower_zero}
-						or die "Unknown option '$name' at line $start_line\n";
+                # директива
+                if (defined $name) {
+                    my ($name_lower, $value, $start_line) = (lc $name, '', $line);
+                    (my $name_lower_zero = $name_lower) =~ s/\d+$/0/;
+                    # аесть такая директива вообще?
+                    exists $configVarName{$name_lower_zero}
+                        or die "Unknown option '$name' at line $start_line\n";
 
-					# однострочное значение
-					if (defined $inline_value) {
-						($value = $inline_value) =~ s/\h+$//;
-					}
-					# многострочное значение
-					elsif (defined $multiline) {
-						$line++;
-						if (defined $multiline_value) {
-							$value = $multiline_value;
-							$line += 1 + ($value =~ tr/\n/\n/);
-						}
-					}
+                    # однострочное значение
+                    if (defined $inline_value) {
+                        ($value = $inline_value) =~ s/\h+$//;
+                    }
+                    # многострочное значение
+                    elsif (defined $multiline) {
+                        $line++;
+                        if (defined $multiline_value) {
+                            $value = $multiline_value;
+                            $line += 1 + ($value =~ tr/\n/\n/);
+                        }
+                    }
 
-					# пустое значение: пусто или не определено
-					( $value eq '' && VAR_EMPTY_UNDEF == ($configVarName{$name_lower_zero} & VAR_EMPTY) )
-						and $value = undef;
+                    # пустое значение: пусто или не определено
+                    ( $value eq '' && VAR_EMPTY_UNDEF == ($configVarName{$name_lower_zero} & VAR_EMPTY) )
+                        and $value = undef;
 
-					# должен быть массив?
-					if (VAR_DATA_ARRAY == ($configVarName{$name_lower_zero} & VAR_DATA)) {
-						my $new_value;
-						if (defined $value) {
-							$value =~ s/^\s+|\s+$//g;
-							if ($value ne '') {
-								# пилим на части
-								$new_value = [ split(/\s+/, $value) ];
-								# это еще и шаблон?
-								if (VAR_TYPE_TEMPLATE == ($configVarName{$name_lower_zero} & VAR_TYPE)) {
-									# создаём шаблоны
-									for my $word (@$new_value) {
-										eval {
-											$word = VHostGen::Template->new($word, $start_line);
-										};
-										if ($@) {
-											chomp $@;
-											die "Error in value of option $name on line $start_line: $@\n";
-										}
-									}
-								}
-							}
-						}
-						# значение - всегда массив
-						$value = $new_value || [];
-					}
-					# скаляр
-					else {
-						if (defined $value) {
-							# должен быть шаблон?
-							if (VAR_TYPE_TEMPLATE == ($configVarName{$name_lower_zero} & VAR_TYPE)) {
-								eval {
-									$value = VHostGen::Template->new($value, $start_line);
-								};
-								if ($@) {
-									chomp $@;
-									die "Error in value of option $name on line $start_line: $@\n";
-								}
-							}
-						}
-					}
+                    # должен быть массив?
+                    if (VAR_DATA_ARRAY == ($configVarName{$name_lower_zero} & VAR_DATA)) {
+                        my $new_value;
+                        if (defined $value) {
+                            $value =~ s/^\s+|\s+$//g;
+                            if ($value ne '') {
+                                # пилим на части
+                                $new_value = [ split(/\s+/, $value) ];
+                                # это еще и шаблон?
+                                if (VAR_TYPE_TEMPLATE == ($configVarName{$name_lower_zero} & VAR_TYPE)) {
+                                    # создаём шаблоны
+                                    for my $word (@$new_value) {
+                                        eval {
+                                            $word = VHostGen::Template->new($word, $start_line);
+                                        };
+                                        if ($@) {
+                                            chomp $@;
+                                            die "Error in value of option $name on line $start_line: $@\n";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        # значение - всегда массив
+                        $value = $new_value || [];
+                    }
+                    # скаляр
+                    else {
+                        if (defined $value) {
+                            # должен быть шаблон?
+                            if (VAR_TYPE_TEMPLATE == ($configVarName{$name_lower_zero} & VAR_TYPE)) {
+                                eval {
+                                    $value = VHostGen::Template->new($value, $start_line);
+                                };
+                                if ($@) {
+                                    chomp $@;
+                                    die "Error in value of option $name on line $start_line: $@\n";
+                                }
+                            }
+                        }
+                    }
 
-					# кладем дорективу и значение в конфиг
-					$config->{$name_lower} = $value;
-				}
-				$line++;
-			}
+                    # кладем дорективу и значение в конфиг
+                    $config->{$name_lower} = $value;
+                }
+                $line++;
+            }
 
-			return $config;
-		}
-		else {
-			return;
-		}
-	}
+            return $config;
+        }
+        else {
+            return;
+        }
+    }
 
-	# получение конфига по имени файла
-	# если такой уже грузили, то достаётся из кеша
-	# $filename - имя файла конфига
-	sub getConfig($) {
-		my ($filename) = @_;
-		exists $loaded_configs{$filename}
-			or $loaded_configs{$filename} = loadConfig($filename);
+    # получение конфига по имени файла
+    # если такой уже грузили, то достаётся из кеша
+    # $filename - имя файла конфига
+    sub getConfig($) {
+        my ($filename) = @_;
+        exists $loaded_configs{$filename}
+            or $loaded_configs{$filename} = loadConfig($filename);
 
-		$loaded_configs{$filename};
-	}
+        $loaded_configs{$filename};
+    }
 }
 
 # применене загруженного конфига в конечный конфиг
@@ -962,28 +962,28 @@ sub uniq(@) {
 # \%data   - ссылка на загруженный конфиг
 # $source  - тип загруженного конфига
 sub applyConfig(\%\%$) {
-	my ($target, $data, $source) = @_;
+    my ($target, $data, $source) = @_;
 
-	$source &= VAR_SOURCE;
+    $source &= VAR_SOURCE;
 
-	for my $name (keys %$data) {
-		# матюгаемся на директивы, которые не могут быть в этом типе конфига
-		($configVarName{$name} & $source)
-			or die "Option '$name' is not allowed in this file\n";
+    for my $name (keys %$data) {
+        # матюгаемся на директивы, которые не могут быть в этом типе конфига
+        ($configVarName{$name} & $source)
+            or die "Option '$name' is not allowed in this file\n";
 
-		$target->{$name} = $data->{$name};
-	}
+        $target->{$name} = $data->{$name};
+    }
 
-	# инициализируем неопределенные директивы-шаблоны
-	$target->{$_} = VHostGen::Template->newEmpty()
-		for grep {
-			($configVarName{$_} & $source)
-			&& VAR_DATA_SCALAR   == ($configVarName{$_} & VAR_DATA)
-			&& VAR_TYPE_TEMPLATE == ($configVarName{$_} & VAR_TYPE)
-			&& ! defined $target->{$_}
-		} keys %configVarName;
+    # инициализируем неопределенные директивы-шаблоны
+    $target->{$_} = VHostGen::Template->newEmpty()
+        for grep {
+            ($configVarName{$_} & $source)
+            && VAR_DATA_SCALAR   == ($configVarName{$_} & VAR_DATA)
+            && VAR_TYPE_TEMPLATE == ($configVarName{$_} & VAR_TYPE)
+            && ! defined $target->{$_}
+        } keys %configVarName;
 
-	1;
+    1;
 }
 
 # чтение файла конфига в текущий глобальный конфиг программы
@@ -991,322 +991,322 @@ sub applyConfig(\%\%$) {
 # \%config  - конечный конфиг, в который класть директивы
 # $source   - тип загружаемого конфига
 sub readConfig ($\%$) {
-	my ($filename, $config, $source) = @_;
+    my ($filename, $config, $source) = @_;
 
-	my $read_config = getConfig($filename);
-	applyConfig(%$config, %{ $read_config || {} }, $source);
+    my $read_config = getConfig($filename);
+    applyConfig(%$config, %{ $read_config || {} }, $source);
 
-	return unless $read_config;
-	1;
+    return unless $read_config;
+    1;
 }
 
 # слияние конфигов директории
 # \%target - ссылка на текущий конфиг
 # \%add    - ссылка на вливаемый конфиг
 sub mergeDirConfig(\%\%) {
-	my ($target, $add) = @_;
+    my ($target, $add) = @_;
 
-	for my $name (keys %$add) {
-		(my $name_zero = $name) =~ s/\d+$/0/;
-		# свойства директивы
-		my $desc = $configVarName{$name_zero};
+    for my $name (keys %$add) {
+        (my $name_zero = $name) =~ s/\d+$/0/;
+        # свойства директивы
+        my $desc = $configVarName{$name_zero};
 
-		my $merge_to = ($desc & VAR_MERGE_TO);
-		if (VAR_MERGE_TO_NEVER == $merge_to) {
-			next;
-		}
-		elsif (VAR_MERGE_TO_UNDEF == $merge_to) {
-			next if defined $target->{$name};
-		}
-		elsif (VAR_MERGE_TO_EMPTY == $merge_to) {
-			next if defined $target->{$name} and '' ne $target->{$name};
-		}
-		elsif (VAR_MERGE_TO_ALWAYS == $merge_to) {
-			# всегда можно
-		}
-		# else: нет грудих вариантов
+        my $merge_to = ($desc & VAR_MERGE_TO);
+        if (VAR_MERGE_TO_NEVER == $merge_to) {
+            next;
+        }
+        elsif (VAR_MERGE_TO_UNDEF == $merge_to) {
+            next if defined $target->{$name};
+        }
+        elsif (VAR_MERGE_TO_EMPTY == $merge_to) {
+            next if defined $target->{$name} and '' ne $target->{$name};
+        }
+        elsif (VAR_MERGE_TO_ALWAYS == $merge_to) {
+            # всегда можно
+        }
+        # else: нет грудих вариантов
 
-		# TODO зарезервировано VAR_MERGE_FROM
+        # TODO зарезервировано VAR_MERGE_FROM
 
-		# если массив
-		if (VAR_DATA_ARRAY == ($desc & VAR_DATA)) {
-			if (defined $add->{$name}) {
-				# создаём новый массив
-				# иначе получим расшаренный массив и закосячим его
-				$target->{$name} = [
-					(defined $target->{$name})
-						? @{ $target->{$name} }
-						: ()
-					,
-					@{ $add->{$name} }
-				];
-			}
-		}
-		# скаляр
-		else {
-			$target->{$name} = (defined $add->{$name})
-				? $add->{$name}
-				: undef
-			;
+        # если массив
+        if (VAR_DATA_ARRAY == ($desc & VAR_DATA)) {
+            if (defined $add->{$name}) {
+                # создаём новый массив
+                # иначе получим расшаренный массив и закосячим его
+                $target->{$name} = [
+                    (defined $target->{$name})
+                        ? @{ $target->{$name} }
+                        : ()
+                    ,
+                    @{ $add->{$name} }
+                ];
+            }
+        }
+        # скаляр
+        else {
+            $target->{$name} = (defined $add->{$name})
+                ? $add->{$name}
+                : undef
+            ;
 
-			$target->{$name} = ''
-				if !defined $target->{$name} && VAR_EMPTY_VALUE == ($desc & VAR_EMPTY);
-		}
-	}
+            $target->{$name} = ''
+                if !defined $target->{$name} && VAR_EMPTY_VALUE == ($desc & VAR_EMPTY);
+        }
+    }
 
-	1;
+    1;
 }
 
 # функции записи конечного генерируемого конфига
 { my $ApacheFH;
-	# открытие файла за запись
-	sub ApacheConfOpen () {
-		return unless $config->{apacheoutput};
+    # открытие файла за запись
+    sub ApacheConfOpen () {
+        return unless $config->{apacheoutput};
 
-		die "No value specified for ApacheConf\n"
-			unless defined $config->{apacheconf};
+        die "No value specified for ApacheConf\n"
+            unless defined $config->{apacheconf};
 
-		open $ApacheFH, ">", $config->{apacheconf}
-			or die qq[Unable to open ApacheConf file "$config->{apacheconf}"\n];
+        open $ApacheFH, ">", $config->{apacheconf}
+            or die qq[Unable to open ApacheConf file "$config->{apacheconf}"\n];
 
-		print $ApacheFH $config->{beginfile}->get();
-		1;
-	}
+        print $ApacheFH $config->{beginfile}->get();
+        1;
+    }
 
-	# запись текущего виртуального хоста по шаблону
-	sub ApacheConfVHost () {
-		return unless defined $ApacheFH;
+    # запись текущего виртуального хоста по шаблону
+    sub ApacheConfVHost () {
+        return unless defined $ApacheFH;
 
-		print $ApacheFH "\n", $config->{virtualhost}->get();
-		1;
-	}
+        print $ApacheFH "\n", $config->{virtualhost}->get();
+        1;
+    }
 
-	sub ApacheConfClose() {
-		return unless defined $ApacheFH;
+    sub ApacheConfClose() {
+        return unless defined $ApacheFH;
 
-		print $ApacheFH $config->{endfile}->get();
-		close $ApacheFH;
-		undef $ApacheFH;
-		1;
-	}
+        print $ApacheFH $config->{endfile}->get();
+        close $ApacheFH;
+        undef $ApacheFH;
+        1;
+    }
 }
 
 # функции записи конечного генерируемого конфига nginx
 { my $nginx_fh;
-	# открытие файла за запись
-	sub nginxConfOpen () {
-		return unless $config->{nginxoutput};
+    # открытие файла за запись
+    sub nginxConfOpen () {
+        return unless $config->{nginxoutput};
 
-		die "No value specified for NginxConf\n"
-			unless defined $config->{nginxconf};
+        die "No value specified for NginxConf\n"
+            unless defined $config->{nginxconf};
 
-		open $nginx_fh, ">", $config->{nginxconf}
-			or die qq[Unable to open NginxConf file "$config->{nginxconf}"\n];
+        open $nginx_fh, ">", $config->{nginxconf}
+            or die qq[Unable to open NginxConf file "$config->{nginxconf}"\n];
 
-		print $nginx_fh $config->{nginxbeginfile}->get();
-		1;
-	}
+        print $nginx_fh $config->{nginxbeginfile}->get();
+        1;
+    }
 
-	# запись текущего сервера nginx по шаблону
-	sub nginxConfServer () {
-		return unless defined $nginx_fh;
+    # запись текущего сервера nginx по шаблону
+    sub nginxConfServer () {
+        return unless defined $nginx_fh;
 
-		print $nginx_fh "\n", $config->{nginxserver}->get();
-		1;
-	}
+        print $nginx_fh "\n", $config->{nginxserver}->get();
+        1;
+    }
 
-	sub nginxConfClose() {
-		return unless defined $nginx_fh;
+    sub nginxConfClose() {
+        return unless defined $nginx_fh;
 
-		print $nginx_fh $config->{nginxendfile}->get();
-		close $nginx_fh;
-		undef $nginx_fh;
-		1;
-	}
+        print $nginx_fh $config->{nginxendfile}->get();
+        close $nginx_fh;
+        undef $nginx_fh;
+        1;
+    }
 }
 
 # функции генерации файла hosts
 { my $WinHostsFH;
-	# открытие файла на запись, если он включен директивой
-	sub WinHostsOpen() {
-		return unless defined $config->{winhosts};
-		die "WinHostsIP has no value when WinHosts is specified\n"
-			unless defined $config->{winhostsip};
+    # открытие файла на запись, если он включен директивой
+    sub WinHostsOpen() {
+        return unless defined $config->{winhosts};
+        die "WinHostsIP has no value when WinHosts is specified\n"
+            unless defined $config->{winhostsip};
 
-		open $WinHostsFH, ">", $config->{winhosts}
-			or die qq[Unable to open WinHosts file "$config->{winhosts}"\n];
+        open $WinHostsFH, ">", $config->{winhosts}
+            or die qq[Unable to open WinHosts file "$config->{winhosts}"\n];
 
-		print $WinHostsFH "# This file has been generated automatically by $config->{version} at $config->{time}\n\n";
-		1;
-	}
+        print $WinHostsFH "# This file has been generated automatically by $config->{version} at $config->{time}\n\n";
+        1;
+    }
 
-	# сохранение домена текущего виртуального хоста
-	sub WinHostsAdd() {
-		return unless $WinHostsFH;
-		print $WinHostsFH "$config->{winhostsip}\t\t$config->{domain}\n";
-		1;
-	}
+    # сохранение домена текущего виртуального хоста
+    sub WinHostsAdd() {
+        return unless $WinHostsFH;
+        print $WinHostsFH "$config->{winhostsip}\t\t$config->{domain}\n";
+        1;
+    }
 }
 
 # подробный man программы
 sub usage_man() {
-	use Pod::Man;
+    use Pod::Man;
 
-	my $parser = Pod::Man->new(
-		utf8    => 1,
-		center  => VERSION_NAME . " Manual",
-		release => VERSION_NUMBER,
-	);
-	if ( open(my $man, "|man -l -") ) {
-		$parser->parse_from_file(__FILE__, $man);
-		close $man;
-		exit;
-	}
-	else {
-		warn "Can't create a pipe to man tool\n";
-		warn "Try to execute:  pod2man --utf8 '$0' | man -l -\n";
-		exit 1;
-	}
+    my $parser = Pod::Man->new(
+        utf8    => 1,
+        center  => VERSION_NAME . " Manual",
+        release => VERSION_NUMBER,
+    );
+    if ( open(my $man, "|man -l -") ) {
+        $parser->parse_from_file(__FILE__, $man);
+        close $man;
+        exit;
+    }
+    else {
+        warn "Can't create a pipe to man tool\n";
+        warn "Try to execute:  pod2man --utf8 '$0' | man -l -\n";
+        exit 1;
+    }
 }
 
 # инициализация при запуске
 sub init () {
-	# выключить буферизацию
-	$| = 1;
-	my $oldfh = select STDERR;
-	$| = 1;
-	select $oldfh;
+    # выключить буферизацию
+    $| = 1;
+    my $oldfh = select STDERR;
+    $| = 1;
+    select $oldfh;
 
-	Getopt::Long::Configure("bundling");
-	my (%opt);
-	GetOptions(\%opt,
-		"help|h|?",
-		"man",
-		"directory|d=s",
-	)
-		or pod2usage(2);
+    Getopt::Long::Configure("bundling");
+    my (%opt);
+    GetOptions(\%opt,
+        "help|h|?",
+        "man",
+        "directory|d=s",
+    )
+        or pod2usage(2);
 
-	pod2usage(1)
-		if defined $opt{help};
+    pod2usage(1)
+        if defined $opt{help};
 
-	usage_man()
-		if defined $opt{man};
+    usage_man()
+        if defined $opt{man};
 
-	$opt{directory} = $ARGV[0]
-		if @ARGV && ! defined $opt{directory};
+    $opt{directory} = $ARGV[0]
+        if @ARGV && ! defined $opt{directory};
 
-	if (defined $opt{directory}) {
-		-d $opt{directory}
-			or pod2usage({
-				-exitval => 2,
-				-message => qq[Directory not found: "$opt{directory}"],
-			})
-		;
+    if (defined $opt{directory}) {
+        -d $opt{directory}
+            or pod2usage({
+                -exitval => 2,
+                -message => qq[Directory not found: "$opt{directory}"],
+            })
+        ;
 
-		$cwd = Cwd::abs_path( $opt{directory} );
-	}
-	else {
-		$cwd = Cwd::cwd();
-	}
+        $cwd = Cwd::abs_path( $opt{directory} );
+    }
+    else {
+        $cwd = Cwd::cwd();
+    }
 
-	print VERSION, "\n";
+    print VERSION, "\n";
 
-	# переход в стартовую директорию
-	chdir $cwd or die "Unable to change working directory to $cwd\n";
-	print "cwd is $cwd\n";
+    # переход в стартовую директорию
+    chdir $cwd or die "Unable to change working directory to $cwd\n";
+    print "cwd is $cwd\n";
 
-	$config->{cwd}  = $cwd;
-	$config->{cwd}  =~ tr{\\}{/};
-	$config->{path} = $config->{cwd};
-	$config->{subpath} = '';
+    $config->{cwd}  = $cwd;
+    $config->{cwd}  =~ tr{\\}{/};
+    $config->{path} = $config->{cwd};
+    $config->{subpath} = '';
 
-	{
-		my ($s, $i, $h, $d, $m, $y) = localtime;
-		$config->{time} = sprintf("%04d-%02d-%02d %02d:%02d:%02d", $y + 1900, $m + 1, $d, $h, $i, $s);
-	}
+    {
+        my ($s, $i, $h, $d, $m, $y) = localtime;
+        $config->{time} = sprintf("%04d-%02d-%02d %02d:%02d:%02d", $y + 1900, $m + 1, $d, $h, $i, $s);
+    }
 
-	# копируем значения предопределенных переменные конфига
-	# в список константных "переменных" для оптимизации
-	$VHostGen::Template::Var::constant{$_} = $config->{$_}
-		for grep {
-			VAR_SOURCE_PREDEF == ($configVarName{$_} & VAR_SOURCE)
-		} keys %configVarName
-	;
+    # копируем значения предопределенных переменные конфига
+    # в список константных "переменных" для оптимизации
+    $VHostGen::Template::Var::constant{$_} = $config->{$_}
+        for grep {
+            VAR_SOURCE_PREDEF == ($configVarName{$_} & VAR_SOURCE)
+        } keys %configVarName
+    ;
 
-	# грузим конфиг стартовой директории
-	my $cfg = './' . CONFIGURATION_FILE;
-	eval {
-		readConfig($cfg, %$config, VAR_SOURCE_GLOBAL)
-			or die "File not found\n";
-	};
-	die qq[Config "$cfg": $@]
-		if $@;
+    # грузим конфиг стартовой директории
+    my $cfg = './' . CONFIGURATION_FILE;
+    eval {
+        readConfig($cfg, %$config, VAR_SOURCE_GLOBAL)
+            or die "File not found\n";
+    };
+    die qq[Config "$cfg": $@]
+        if $@;
 
-	1;
+    1;
 }
 
 sub prepareResults() {
-	my $has_job;
+    my $has_job;
 
-	# открываем выходные файлы
-	$has_job = 1 if ApacheConfOpen();
-	$has_job = 1 if nginxConfOpen();
-	$has_job = 1 if WinHostsOpen();
+    # открываем выходные файлы
+    $has_job = 1 if ApacheConfOpen();
+    $has_job = 1 if nginxConfOpen();
+    $has_job = 1 if WinHostsOpen();
 
-	$has_job or die "Nothing to do - all outputs are disabled\n";
+    $has_job or die "Nothing to do - all outputs are disabled\n";
 
-	1;
+    1;
 }
 
 sub finishResults() {
-	ApacheConfClose();
-	nginxConfClose();
+    ApacheConfClose();
+    nginxConfClose();
 }
 
 # стек конфигов при анализе директорий
 { my @configStack;
-	# бекап текущего конфига и создание нового при входе в дочернюю директорию
-	sub configPush () {
-		# бекапим ссылку на исходный конфиг
-		push @configStack, $config;
-		# новая ссылка на новый пустой конфиг
-		my $copy = {};
-		# копируем поштучно
-		for my $name (keys %$config) {
-			# кроме локальных
-			next if VAR_SCOPE_LOCAL == ($configVarName{$name} & VAR_SCOPE);
-			$copy->{$name} = $config->{$name};
-		}
-		# подменяем ссылку
-		$config = $copy;
-		1;
-	}
+    # бекап текущего конфига и создание нового при входе в дочернюю директорию
+    sub configPush () {
+        # бекапим ссылку на исходный конфиг
+        push @configStack, $config;
+        # новая ссылка на новый пустой конфиг
+        my $copy = {};
+        # копируем поштучно
+        for my $name (keys %$config) {
+            # кроме локальных
+            next if VAR_SCOPE_LOCAL == ($configVarName{$name} & VAR_SCOPE);
+            $copy->{$name} = $config->{$name};
+        }
+        # подменяем ссылку
+        $config = $copy;
+        1;
+    }
 
-	# откат к родительскому конфигу при возврате из дочерней директории
-	sub configPop () {
-		croak "Config stack already empty"
-			unless @configStack;
+    # откат к родительскому конфигу при возврате из дочерней директории
+    sub configPop () {
+        croak "Config stack already empty"
+            unless @configStack;
 
-		$config = pop @configStack;
-	}
+        $config = pop @configStack;
+    }
 }
 
 # перечисление дочерних директорий
 # $path - путь родительской директории, в которой ищем дочерние
 sub enumDirs ($) {
-	my ($path) = @_;
+    my ($path) = @_;
 
-	return unless wantarray;
-	opendir my $dir, $path
-		or die "Unable to read the directory.\n";
+    return unless wantarray;
+    opendir my $dir, $path
+        or die "Unable to read the directory.\n";
 
-	my @dirs = grep {
-		$_ ne '.'
-		&& $_ ne '..'
-		&& -d $path . '/' . $_
-	} readdir $dir;
-	closedir $dir;
-	@dirs;
+    my @dirs = grep {
+        $_ ne '.'
+        && $_ ne '..'
+        && -d $path . '/' . $_
+    } readdir $dir;
+    closedir $dir;
+    @dirs;
 }
 
 # проверка валидности доменной метки
@@ -1317,259 +1317,259 @@ sub enumDirs ($) {
 # $label - проверяемая метка
 # $level - уровень.
 sub isValidDomainLabel($$) {
-	my ($label, $level) = @_;
-	return $level
-		? $label =~ /^[a-z\d](?:[-a-z\d]*[a-z\d])?$/
-		: $label =~ /^[a-z](?:[-a-z\d]*[a-z\d])?$/;
+    my ($label, $level) = @_;
+    return $level
+        ? $label =~ /^[a-z\d](?:[-a-z\d]*[a-z\d])?$/
+        : $label =~ /^[a-z](?:[-a-z\d]*[a-z\d])?$/;
 }
 
 { my (@subpath, @domains, @names, @namesCounts);
-	my (%hosts, @host_index);
+    my (%hosts, @host_index);
 
-	# генерация всех полных алиасов для текущего конфига
-	sub aliases() {
-		my $names_count = scalar @names;
-		my $last_name_index = $names_count - 1;
-		my @index = (0) x $names_count;
-		my (@aliases, %domain_aliases, %bak);
-		my $domain_alias_index = 0;
-		my $total_count = 1;
-		$total_count *= $namesCounts[$_] for 0 .. $last_name_index;
+    # генерация всех полных алиасов для текущего конфига
+    sub aliases() {
+        my $names_count = scalar @names;
+        my $last_name_index = $names_count - 1;
+        my @index = (0) x $names_count;
+        my (@aliases, %domain_aliases, %bak);
+        my $domain_alias_index = 0;
+        my $total_count = 1;
+        $total_count *= $namesCounts[$_] for 0 .. $last_name_index;
 
-		if (defined $config->{domainalias}) {
-			# бекапим переменные domainN и domain
-			for my $i (0 .. $last_name_index) {
-				my $n = 'domain' . $i;
-				$bak{$n} = $config->{$n};
-			}
-			$bak{domain} = $config->{domain};
-		}
+        if (defined $config->{domainalias}) {
+            # бекапим переменные domainN и domain
+            for my $i (0 .. $last_name_index) {
+                my $n = 'domain' . $i;
+                $bak{$n} = $config->{$n};
+            }
+            $bak{domain} = $config->{domain};
+        }
 
-		# полный перебор всех комбинаций всех имен и алиасов директорий
-		for my $total_index (0 .. $total_count - 1) {
-			# если задан DomainAlias
-			if (defined $config->{domainalias}) {
-				# генерируем всё из него для каждого варианта полного алиаса
-				#
-				# для этого заполняем domain и domainN текущими значениями
-				push @aliases, $config->{domain} = join(
-					'.',
-					map {
-						$config->{'domain' . $_} = $names[$_]->[$index[$_]]
-					} reverse 0 .. $last_name_index
-				);
-				# и получаем результаты из DomainAlias'ов
-				my $n = 0;
-				for my $domain_alias ( map { $_->get() } @{$config->{domainalias}} ) {
-					next if exists $domain_aliases{$domain_alias};
-					$domain_aliases{$domain_alias} = {
-						alias => $domain_alias,
-						index => ++$n,
-						id    => ++$domain_alias_index,
-					};
-				}
-			}
-			# иначе нет DomainAlias'ов
-			else {
-				# единственный домен из текущих имен
-				push @aliases, join(
-					'.',
-					map {
-						$names[$_]->[$index[$_]]
-					} reverse 0 .. $last_name_index
-				);
-			}
+        # полный перебор всех комбинаций всех имен и алиасов директорий
+        for my $total_index (0 .. $total_count - 1) {
+            # если задан DomainAlias
+            if (defined $config->{domainalias}) {
+                # генерируем всё из него для каждого варианта полного алиаса
+                #
+                # для этого заполняем domain и domainN текущими значениями
+                push @aliases, $config->{domain} = join(
+                    '.',
+                    map {
+                        $config->{'domain' . $_} = $names[$_]->[$index[$_]]
+                    } reverse 0 .. $last_name_index
+                );
+                # и получаем результаты из DomainAlias'ов
+                my $n = 0;
+                for my $domain_alias ( map { $_->get() } @{$config->{domainalias}} ) {
+                    next if exists $domain_aliases{$domain_alias};
+                    $domain_aliases{$domain_alias} = {
+                        alias => $domain_alias,
+                        index => ++$n,
+                        id    => ++$domain_alias_index,
+                    };
+                }
+            }
+            # иначе нет DomainAlias'ов
+            else {
+                # единственный домен из текущих имен
+                push @aliases, join(
+                    '.',
+                    map {
+                        $names[$_]->[$index[$_]]
+                    } reverse 0 .. $last_name_index
+                );
+            }
 
-			# перемещаем индексы на следующую комбинацию
-			my $c = 1;
-			for my $n (reverse 0 .. $last_name_index) {
-				$index[$n] += $c;
-				last if $index[$n] < $namesCounts[$n];
-				$c = int( $index[$n] / $namesCounts[$n] );
-				$index[$n] %= $namesCounts[$n]
-			}
-		}
+            # перемещаем индексы на следующую комбинацию
+            my $c = 1;
+            for my $n (reverse 0 .. $last_name_index) {
+                $index[$n] += $c;
+                last if $index[$n] < $namesCounts[$n];
+                $c = int( $index[$n] / $namesCounts[$n] );
+                $index[$n] %= $namesCounts[$n]
+            }
+        }
 
-		if (defined $config->{domainalias}) {
-			# убираем из %domain_aliases всё, что уже есть в @aliases
-			delete $domain_aliases{$_} for @aliases;
+        if (defined $config->{domainalias}) {
+            # убираем из %domain_aliases всё, что уже есть в @aliases
+            delete $domain_aliases{$_} for @aliases;
 
-			# добавляем %domain_aliases в @aliases
-			push @aliases, map { $_->{alias} }
-				sort {
-					$a->{index} <=> $b->{index}
-					or $a->{id} <=> $b->{id}
-				}
-				values %domain_aliases;
+            # добавляем %domain_aliases в @aliases
+            push @aliases, map { $_->{alias} }
+                sort {
+                    $a->{index} <=> $b->{index}
+                    or $a->{id} <=> $b->{id}
+                }
+                values %domain_aliases;
 
-			# достаем обратно из бекапа domain и domainN
-			for my $i (0 .. $last_name_index) {
-				my $n = 'domain' . $i;
-				$config->{$n} = $bak{$n};
-			}
-			$config->{domain} = $bak{domain};
-		}
+            # достаем обратно из бекапа domain и domainN
+            for my $i (0 .. $last_name_index) {
+                my $n = 'domain' . $i;
+                $config->{$n} = $bak{$n};
+            }
+            $config->{domain} = $bak{domain};
+        }
 
-		# все собранные алиасы в конфиг
-		$config->{aliases} = \@aliases;
-		1;
-	}
+        # все собранные алиасы в конфиг
+        $config->{aliases} = \@aliases;
+        1;
+    }
 
-	# кладем текущий конфиг в хеш виртуальных хостов по соответствующему пути
-	sub vhostDir() {
-		my $path = $config->{path};
+    # кладем текущий конфиг в хеш виртуальных хостов по соответствующему пути
+    sub vhostDir() {
+        my $path = $config->{path};
 
-		warn qq[not a directory under {doc_root}: $config->{doc_root}]
-			unless -d $config->{doc_root};
+        warn qq[not a directory under {doc_root}: $config->{doc_root}]
+            unless -d $config->{doc_root};
 
-		# такой уже есть - слияние
-		if (exists $hosts{$path}) {
-			mergeDirConfig( %{ $hosts{$path} }, %$config );
-		}
-		# еще нет - добавление
-		else {
-			$hosts{$path} = $config;
-			push @host_index, $path;
-		}
-	}
+        # такой уже есть - слияние
+        if (exists $hosts{$path}) {
+            mergeDirConfig( %{ $hosts{$path} }, %$config );
+        }
+        # еще нет - добавление
+        else {
+            $hosts{$path} = $config;
+            push @host_index, $path;
+        }
+    }
 
-	# анализ директории
-	sub domainDir();
-	sub domainDir() {
-		my @dirs = enumDirs('.' . $config->{subpath});
-		# отсортировать без учета регистра. преобразование Шварца
-		@dirs = map  { $_->[1] }
-				sort { $a->[0] cmp $b->[0] }
-				map  { [lc($_), $_] }
-				@dirs;
-		for my $dir (@dirs) {
-			configPush();
-			$config->{depth}--;
+    # анализ директории
+    sub domainDir();
+    sub domainDir() {
+        my @dirs = enumDirs('.' . $config->{subpath});
+        # отсортировать без учета регистра. преобразование Шварца
+        @dirs = map  { $_->[1] }
+                sort { $a->[0] cmp $b->[0] }
+                map  { [lc($_), $_] }
+                @dirs;
+        for my $dir (@dirs) {
+            configPush();
+            $config->{depth}--;
 
-			push @subpath, $dir;
-			my $level = $#subpath;
-			$config->{'dir' . $level} = $dir;
-			$config->{dirs} = [ @subpath ];
-			$config->{subpath} = '/' . join('/', @subpath);
-			my $path = $config->{cwd} . $config->{subpath};
-			$config->{path}    = Cwd::abs_path($path);
+            push @subpath, $dir;
+            my $level = $#subpath;
+            $config->{'dir' . $level} = $dir;
+            $config->{dirs} = [ @subpath ];
+            $config->{subpath} = '/' . join('/', @subpath);
+            my $path = $config->{cwd} . $config->{subpath};
+            $config->{path}    = Cwd::abs_path($path);
 
-			my $cfg = $config->{path} . '/' . CONFIG_DIR_FILE;
-			eval {
-				readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
-			};
-			warn qq[Config "$cfg" ignored: $@\n]
-				if $@;
+            my $cfg = $config->{path} . '/' . CONFIG_DIR_FILE;
+            eval {
+                readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
+            };
+            warn qq[Config "$cfg" ignored: $@\n]
+                if $@;
 
-			unless (defined $config->{skip}) {
-				# попали на симлинк
-				if (-l $path) {
-					# изменяем Name в имя директории, куда ссылается симлинк,
-					# если Name еще не задан
-					defined $config->{name}
-						or $config->{name} = File::Basename::basename( $config->{path} );
+            unless (defined $config->{skip}) {
+                # попали на симлинк
+                if (-l $path) {
+                    # изменяем Name в имя директории, куда ссылается симлинк,
+                    # если Name еще не задан
+                    defined $config->{name}
+                        or $config->{name} = File::Basename::basename( $config->{path} );
 
-					# добавляем имя симлинка в DirAlias
-					# создаем новый массив, чтобы не насоздавать
-					# расшаренных ссылок из рахных конфигов
-					$config->{diralias} = [
-						(defined $config->{diralias})
-							? @{$config->{diralias}}
-							: ()
-						,
-						$config->{dirs}->[$level],
-					];
-				}
+                    # добавляем имя симлинка в DirAlias
+                    # создаем новый массив, чтобы не насоздавать
+                    # расшаренных ссылок из рахных конфигов
+                    $config->{diralias} = [
+                        (defined $config->{diralias})
+                            ? @{$config->{diralias}}
+                            : ()
+                        ,
+                        $config->{dirs}->[$level],
+                    ];
+                }
 
-				my $domain = \(
-					$config->{'domain' . $level} = lc(
-						(defined $config->{name})
-							? $config->{name}
-							: $config->{dirs}->[$level]
-					)
-				);
-				if (isValidDomainLabel($$domain, $level)) {
-					push @domains, $$domain;
+                my $domain = \(
+                    $config->{'domain' . $level} = lc(
+                        (defined $config->{name})
+                            ? $config->{name}
+                            : $config->{dirs}->[$level]
+                    )
+                );
+                if (isValidDomainLabel($$domain, $level)) {
+                    push @domains, $$domain;
 
-					my @dir_aliases = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
-					push @names, \@dir_aliases;
-					push @namesCounts, scalar @dir_aliases;
+                    my @dir_aliases = ($$domain, (defined $config->{diralias}) ? @{$config->{diralias}} : ());
+                    push @names, \@dir_aliases;
+                    push @namesCounts, scalar @dir_aliases;
 
-					$config->{doc_root} = $config->{path};
-					if ($config->{docsubdir}) {
-						$config->{doc_root} .= '/' . $config->{docsubdir};
-					}
+                    $config->{doc_root} = $config->{path};
+                    if ($config->{docsubdir}) {
+                        $config->{doc_root} .= '/' . $config->{docsubdir};
+                    }
 
-					if ($config->{depth} > 0) {
-						domainDir();
-					}
-					else {
-						aliases();
-						vhostDir();
-					}
+                    if ($config->{depth} > 0) {
+                        domainDir();
+                    }
+                    else {
+                        aliases();
+                        vhostDir();
+                    }
 
-					pop @namesCounts;
-					pop @names;
-					pop @domains;
-				}
-				else {
-					warn qq[Invalid domain "$$domain" ignored. Found in "$path".\n];
-				}
-			}
+                    pop @namesCounts;
+                    pop @names;
+                    pop @domains;
+                }
+                else {
+                    warn qq[Invalid domain "$$domain" ignored. Found in "$path".\n];
+                }
+            }
 
-			pop @subpath;
-			configPop();
-		}
-		1;
-	}
+            pop @subpath;
+            configPop();
+        }
+        1;
+    }
 
-	# генерация в ыходного конфига хостов
-	sub generateVhosts() {
-		my $bak = $config;
-		for my $path (@host_index) {
-			$config = $hosts{$path};
+    # генерация в ыходного конфига хостов
+    sub generateVhosts() {
+        my $bak = $config;
+        for my $path (@host_index) {
+            $config = $hosts{$path};
 
-			my @aliases = uniq( @{ $config->{aliases} } );
-			# first item will be the main domain name
-			# exclude it from aliases
-			$config->{domain} = shift @aliases;
+            my @aliases = uniq( @{ $config->{aliases} } );
+            # first item will be the main domain name
+            # exclude it from aliases
+            $config->{domain} = shift @aliases;
 
-			$config->{alias} = (@aliases)
-				? join(' ', @aliases)
-				: undef
-			;
+            $config->{alias} = (@aliases)
+                ? join(' ', @aliases)
+                : undef
+            ;
 
-			if ($config->{apacheoutput}) {
-				$config->{extheaders} = ( $config->{headers}->isset() )
-					? $config->{headers}->get()
-					: undef
-				;
+            if ($config->{apacheoutput}) {
+                $config->{extheaders} = ( $config->{headers}->isset() )
+                    ? $config->{headers}->get()
+                    : undef
+                ;
 
-				ApacheConfVHost();
-			}
+                ApacheConfVHost();
+            }
 
-			if ($config->{nginxoutput}) {
-				$config->{extheaders} = ( $config->{nginxheaders}->isset() )
-					? $config->{nginxheaders}->get()
-					: undef
-				;
+            if ($config->{nginxoutput}) {
+                $config->{extheaders} = ( $config->{nginxheaders}->isset() )
+                    ? $config->{nginxheaders}->get()
+                    : undef
+                ;
 
-				nginxConfServer();
-			}
+                nginxConfServer();
+            }
 
-			WinHostsAdd();
+            WinHostsAdd();
 
-			print "[+] $config->{domain}\t $config->{path}\n";
-		}
-		$config = $bak;
+            print "[+] $config->{domain}\t $config->{path}\n";
+        }
+        $config = $bak;
 
-		if (@host_index) {
-			print "\n" . scalar(@host_index). " virtual hosts created\n";
-		}
-		else {
-			print "No virtual hosts created\n";
-		}
-	}
+        if (@host_index) {
+            print "\n" . scalar(@host_index). " virtual hosts created\n";
+        }
+        else {
+            print "No virtual hosts created\n";
+        }
+    }
 }
 
 init();
