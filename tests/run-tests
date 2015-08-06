@@ -1,0 +1,103 @@
+#!/usr/bin/perl
+package VHostGen::Tests;
+
+use strict;
+use warnings;
+use 5.010;
+
+use File::Basename ();
+
+use constant {
+    VHOSTGEN_PATH => '../.vhostgen',
+};
+
+{;
+    my @errors;
+
+    sub fail($$) {
+        my ($test, $message) = @_;
+
+        push @errors, "$test: $message";
+    }
+
+    sub show_conclusion() {
+        unless (@errors) {
+            print "All tests passed\n";
+            return;
+        }
+
+        for my $message (@errors) {
+            print "$message\n";
+        }
+    }
+
+    sub was_everithing_fine() {
+        return      if @errors;
+        return 1;
+    }
+}
+
+sub run_test($$) {
+    my ($path, $name) = @_;
+
+    my $tree   = "$path/tree";
+    my $result = "$path/result";
+
+    my $apache_conf = "$result/apache.conf";
+    my $nginx_conf  = "$result/nginx.conf";
+    my $hosts_conf  = "$result/hosts.txt";
+
+    my @args = (
+        VHOSTGEN_PATH,
+        '-d', $tree,
+        '--configure', "ApacheOutput=1"
+        '--configure', "ApacheConf=$apache_conf"
+        '--configure', "NginxOutput=1"
+        '--configure', "NginxConf=$nginx_conf"
+        '--configure', "WinHosts=$hosts_conf"
+    );
+
+    system(@args) == 0      or fail($name, "exit code was $?");
+}
+
+sub init() {
+    # выключить буферизацию
+    $| = 1;
+    my $oldfh = select STDERR;
+    $| = 1;
+    select $oldfh;
+
+    print "Tests for vhostgen\n";
+
+    my $dir = File::Basename::dirname(__FILE__);
+    print "CD to $dir\n";
+    chdir $dir              or die "Cannot CD to $dir\n";
+    -e -f VHOSTGEN_PATH     or die "Cannot locate main program\n";
+}
+
+sub run_tests() {
+    print "Search for tests\n";
+
+    my $path = '.';
+    opendir my $dh, $path   or die "Cannot read directory";
+
+    my @dirs =
+        sort { $a cmp $b }
+        grep { $_ ne '.' && $_ ne '..' && -d "$path/$_" }
+        readdir $dh;
+
+    closedir $dh;
+
+    print "Found tests: ", scalar(@dirs), "\n";
+
+    for my $subdir (@dirs) {
+        run_test("$path/$subdir", $subdir);
+    }
+}
+
+init();
+run_tests();
+show_conclusion();
+
+was_everithing_fine() or die "Some tests are failed\n";
+1;
