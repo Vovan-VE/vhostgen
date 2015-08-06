@@ -1,3 +1,6 @@
+# Конфиг для редактора nano
+# О том, как использовать, см. nanorc(5)
+
 ## Конфиги утилиты генерации хостов vhostgen
 syntax "vhost" "\.vhost(\.cfg)?$"
 ## комментарии: начинаются на # в начале строки, не считая пробелов
@@ -13,7 +16,7 @@ icolor magenta         "^[[:space:]]*(diralias)\>"
 ## массив - фиолетовый; шаблон - яркий/жирный
 icolor brightmagenta   "^[[:space:]]*(domainalias)\>"
 ## строковые директивы
-icolor green           "^[[:space:]]*(port|depth|name|apacheconf|nginxconf|winhosts(ip)?|docsubdir)\>"
+icolor green           "^[[:space:]]*(port|depth|name|apacheconf|nginxconf|winhosts(ip)?|docsubdir|dirconfig)\>"
 ## строковые, шаблоны
 icolor brightgreen     "^[[:space:]]*(beginfile|endfile|virtualhost|headers|nginx(beginfile|endfile|server|headers))\>"
 ## тело многострочного блока строки

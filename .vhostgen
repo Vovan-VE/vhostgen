@@ -22,7 +22,6 @@ use constant {
 use constant {
     VERSION            => VERSION_NAME . '/' . VERSION_NUMBER,
     CONFIGURATION_FILE => '.vhost.cfg',
-    CONFIG_DIR_FILE    => '.vhost',
 };
 
 # битовые маски для описания переменных конфига
@@ -82,6 +81,7 @@ my %configVarName = (
     cwd         => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
     version     => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 
+    dirconfig   => VAR_SOURCE_GLOBAL | VAR_EMPTY_VALUE,
     winhosts    => VAR_SOURCE_GLOBAL,
     winhostsip  => VAR_SOURCE_GLOBAL,
     depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
@@ -132,6 +132,7 @@ my $config = {
     cwd         => undef,
     time        => undef,
     version     => VERSION,
+    dirconfig   => '.vhost',
     winhosts    => undef,
     winhostsip  => '127.0.0.1',
     depth       => 2,
@@ -1169,6 +1170,15 @@ sub usage_man() {
     }
 }
 
+sub is_valid_dir_config_name($) {
+    my ($name) = @_;
+
+    return unless $name;
+    return if $name =~ /^\.+$/;
+    return if $name =~ m{[/\\]};
+    return 1;
+}
+
 # инициализация при запуске
 sub init () {
     # выключить буферизацию
@@ -1241,6 +1251,9 @@ sub init () {
     };
     die qq[Config "$cfg": $@]
         if $@;
+
+    is_valid_dir_config_name($config->{dirconfig})
+        or die qq[Invalid DirConfig value: "$config->{dirconfig}"\n];
 
     1;
 }
@@ -1454,7 +1467,7 @@ sub isValidDomainLabel($$) {
             my $path = $config->{cwd} . $config->{subpath};
             $config->{path}    = Cwd::abs_path($path);
 
-            my $cfg = $config->{path} . '/' . CONFIG_DIR_FILE;
+            my $cfg = $config->{path} . '/' . $config->{dirconfig};
             eval {
                 readConfig($cfg, %$config, VAR_SOURCE_PERDIR);
             };
@@ -1652,6 +1665,9 @@ B<vhostgen> сканирует стартовую директорию реку�
 
 Располагается в анализируемых дочерних директориях при необходимости.
 
+Имя файла может быть переопределено в главном конфиге с помощью директивы B<DirConfig>.
+Далее для обозначения этого файла используется имя по умолчанию: F<.vhost> .
+
 =back
 
 Конфигурационный файл представляет собой текстовый файл с директивами.
@@ -1723,6 +1739,10 @@ C<UNDEF>, если не описано иное поведение данной 
 =item B<Depth> I<n>
 
 Необязательно. Глубина дерева каталогов для анализа. По умолчанию: I<2>.
+
+=item B<DirConfig> I<файл>
+
+Необязательно. Другое имя для конфигурационного файла директорий F<.vhost> .
 
 =item B<DocSubdir> I<путь>
 
