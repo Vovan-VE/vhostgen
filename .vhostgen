@@ -137,14 +137,14 @@ my $config = {
     winhostsip  => '127.0.0.1',
     depth       => 2,
     docsubdir   => '',
-    apacheconf  => './vhosts.conf',
+    apacheconf  => undef,
     apacheoutput => 1,
     port        => undef,
     beginfile   => undef,
     endfile     => undef,
     virtualhost => undef,
 
-    nginxconf      => './nginx-servers.conf',
+    nginxconf      => undef,
     nginxoutput    => 0,
     nginxport      => undef,
     nginxbeginfile => undef,
@@ -1291,13 +1291,12 @@ sub init () {
     # грузим конфиг стартовой директории
     my $cfg = './' . CONFIGURATION_FILE;
     eval {
-        readConfig($cfg, %$config, VAR_SOURCE_GLOBAL)
-            or die "File not found\n";
+        readConfig($cfg, %$config, VAR_SOURCE_GLOBAL);
     };
     die qq[Config "$cfg": $@]
         if $@;
 
-    # переопределение умолчаний из командной строки
+    # главный конфиг из командной строки
     if (exists $opt{configure}) {
         eval {
             overrideDefaultConfig(%$config, %{$opt{configure}});
@@ -1779,9 +1778,10 @@ C<UNDEF>, если не описано иное поведение данной 
 
 =item B<ApacheConf> I<файл>
 
-Необязательно. Абсолютный или относительный путь к выходному файлу виртуальных
+Обязательно, если B<ApacheOutput> включено.
+Абсолютный или относительный путь к выходному файлу виртуальных
 хостов Apache. Относительный путь вычисляется от стартовой директории. По умолчанию
-равен F<./vhosts.conf> .
+значения нет.
 
 =item B<ApacheOutput> I<bool>
 
@@ -1814,9 +1814,9 @@ C<UNDEF>, если не описано иное поведение данной 
 
 =item B<NginxConf> I<файл>
 
-Необязательно. Абсолютный или относительный путь к выходному файлу серверов
-nginx. Относительный путь вычисляется от стартовой директории. По умолчанию
-равен F<./nginx-servers.conf> .
+Обязательно, если B<NginxOutput> включено. Абсолютный или относительный путь
+к выходному файлу серверов nginx. Относительный путь вычисляется от стартовой
+директории. По умолчанию значения нет.
 
 =item B<NginxOutput> I<bool>
 
