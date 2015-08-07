@@ -4,12 +4,146 @@ package VHostGen::Tests;
 use strict;
 use warnings;
 use 5.010;
+use utf8;
 
 use File::Basename ();
+use IPC::Open2;
 
 use constant {
     VHOSTGEN_PATH => '../.vhostgen',
+    INIT_CONFIG   => 'init-vhost.cfg',
+    TREE_CONFIG   => '.vhost.cfg',
 };
+
+{; package VHostGen::Tests::Config;
+    # PACKAGE->new()
+    # PACKAGE->new({ NAME => VALUE, ...})
+    sub new {
+        my ($self, $vars) = @_;
+
+        my $class = ref($self) || $self;
+        $vars //= {};
+        ref($vars) eq 'HASH'            or die '$vars must be HASHREF';
+
+        bless {vars => $vars, parent => undef}, $class
+    }
+
+    # PACKAGE->override($parent, { NAME => VALUE, ...})
+    # $object->override($parent)
+    sub override {
+        my ($self, $parent, $vars) = @_;
+
+        ref($parent) eq __PACKAGE__     or die '$parent must be object ' . __PACKAGE__;
+
+        my $that = (ref $self) ? $self : new($self, $vars);
+        $that->{parent} = $parent;
+
+        return $that;
+    }
+
+    # PACKAGE->load($file)
+    # $object->load($file)
+    sub load {
+        my ($self, $file) = @_;
+
+        my $that = (ref $self) ? $self : new($self);
+        my $vars = $that->{vars};
+
+        open(my $f, '<', $file)     or die "cannot read file $file: $!\n";
+
+        eval {
+            while (my $line = <$f>) {
+                next if $line =~ /^#/;
+                chomp $line;
+                next if $line =~ /^\h*$/;
+
+                $line =~ /
+                    ^
+                    (?<name> [a-z]+ )
+                    \h*
+                    (?:
+                        (?<begin> <<<< )
+                    |
+                        (?<= \h )
+                        (?! <+ $ )
+                        (?<inline> .* )
+                    )?
+                    $
+                /ix
+                    or die "invalid config syntax it line $.: [$line]\n";
+
+                my $name   = lc $+{name};
+                my $begin  = $+{begin};
+                my $inline = $+{inline};
+
+                if ($begin) {
+                    my $begin_line = $.;
+                    my $end = 0;
+                    my $text = '';
+                    while (my $string = <$f>) {
+                        chomp(my $str = $string);
+                        if ($str eq '>>>>') {
+                            $end = 1;
+                            last;
+                        }
+                        $text .= $string;
+                    }
+                    $end or die "unclosed multiline value opened at line $begin_line\n";
+                    chomp $text;
+                    $vars->{$name} = $text;
+                }
+                else {
+                    $inline //= '';
+                    $inline =~ s/\h+$//;
+                    $vars->{$name} = $inline;
+                }
+            }
+        };
+        if ($@) {
+            die "config failed $file: $@";
+        }
+
+        close $f;
+
+        return $that;
+    }
+
+    # $object->get($name)
+    sub get {
+        my ($self, $name) = @_;
+
+        ref($self) or die 'usage: $obj->get()';
+
+        my $vars = $self->{vars};
+        return $vars->{$name}       if exists $vars->{$name};
+
+        my $parent = $self->{parent};
+        return $parent->get($name)  if $parent;
+
+        return;
+    }
+
+    sub all {
+        my ($self) = @_;
+
+        ref($self) or die 'usage: $obj->all()';
+
+        my $parent = $self->{parent};
+        my %all = ($parent ? $parent->all() : (), %{$self->{vars}});
+    }
+
+    # $object->each(sub { my ($name, $value) = @_; })
+    sub each {
+        my ($self, $sub) = @_;
+
+        ref($self) && ref($sub) eq 'CODE'   or die 'usage: $obj->get($sub)';
+
+        my %all = $self->all();
+        for my $name (keys %all) {
+            $sub->($name, $all{$name});
+        }
+    }
+}
 
 {;
     my @errors;
@@ -22,12 +156,12 @@ use constant {
 
     sub show_conclusion() {
         unless (@errors) {
-            print "All tests passed\n";
+            say "All tests passed";
             return;
         }
 
         for my $message (@errors) {
-            print "$message\n";
+            say $message;
         }
     }
 
@@ -37,27 +171,48 @@ use constant {
     }
 }
 
-sub run_test($$) {
-    my ($path, $name) = @_;
+sub execute_quiet {
+    my (@args) = @_;
+
+    @args or die "no arguments";
+
+    my $pid = open2(my $out, my $in, @args);
+    close $in;
+
+    waitpid $pid, 0;
+    return $?;
+}
+
+sub run_test($$$) {
+    my ($path, $name, $parentConfig) = @_;
 
     my $tree   = "$path/tree";
-    my $result = "$path/result";
+    my $result = "../result";
+
+    my $config = VHostGen::Tests::Config->load($tree . '/' . TREE_CONFIG);
+    $config->override($parentConfig);
 
     my $apache_conf = "$result/apache.conf";
     my $nginx_conf  = "$result/nginx.conf";
     my $hosts_conf  = "$result/hosts.txt";
 
-    my @args = (
-        VHOSTGEN_PATH,
-        '-d', $tree,
-        '--configure', "ApacheOutput=1"
-        '--configure', "ApacheConf=$apache_conf"
-        '--configure', "NginxOutput=1"
-        '--configure', "NginxConf=$nginx_conf"
-        '--configure', "WinHosts=$hosts_conf"
-    );
+    my @args = (VHOSTGEN_PATH, '-d', $tree);
+    $parentConfig->each(sub {
+        my ($name, $value) = @_;
 
-    system(@args) == 0      or fail($name, "exit code was $?");
+        push @args, '--configure', "$name=$value"   if defined $value;
+    });
+    $config->get('ApacheOutput')    and push @args, '--configure', "ApacheConf=$apache_conf";
+    $config->get('NginxOutput')     and push @args, '--configure', "NginxConf=$nginx_conf";
+    $config->get('WinHostsOutput')  and push @args, '--configure', "WinHosts=$hosts_conf";
+
+    my $code = execute_quiet(@args);
+    if ($code) {
+        fail($name, "exit code was $code");
+        return
+    }
+
+    return 1;
 }
 
 sub init() {
@@ -67,19 +222,22 @@ sub init() {
     $| = 1;
     select $oldfh;
 
-    print "Tests for vhostgen\n";
+    say "Tests for vhostgen";
 
     my $dir = File::Basename::dirname(__FILE__);
-    print "CD to $dir\n";
-    chdir $dir              or die "Cannot CD to $dir\n";
-    -e -f VHOSTGEN_PATH     or die "Cannot locate main program\n";
+    say "CD to $dir";
+    chdir $dir              or die "cannot CD to $dir\n";
+    -e -f VHOSTGEN_PATH     or die "cannot locate main program\n";
 }
 
 sub run_tests() {
-    print "Search for tests\n";
-
     my $path = '.';
-    opendir my $dh, $path   or die "Cannot read directory";
+
+    say "Read common config";
+    my $config = VHostGen::Tests::Config->load($path . '/' . INIT_CONFIG);
+
+    say "Search for tests";
+    opendir my $dh, $path   or die "cannot read directory";
 
     my @dirs =
         sort { $a cmp $b }
@@ -88,16 +246,20 @@ sub run_tests() {
 
     closedir $dh;
 
-    print "Found tests: ", scalar(@dirs), "\n";
+    say "Found tests: ", scalar(@dirs);
 
     for my $subdir (@dirs) {
-        run_test("$path/$subdir", $subdir);
+        print "$subdir: ";
+        run_test("$path/$subdir", $subdir, $config)
+            ? say '+'
+            : say 'FAIL';
     }
+    say '';
 }
 
 init();
 run_tests();
 show_conclusion();
 
-was_everithing_fine() or die "Some tests are failed\n";
+was_everithing_fine() or die "some tests are failed\n";
 1;
