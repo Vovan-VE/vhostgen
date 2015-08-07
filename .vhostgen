@@ -82,12 +82,14 @@ my %configVarName = (
     version     => VAR_SOURCE_PREDEF | VAR_TPL_ALLOW,
 
     dirconfig   => VAR_SOURCE_GLOBAL | VAR_EMPTY_VALUE,
-    winhosts    => VAR_SOURCE_GLOBAL,
-    winhostsip  => VAR_SOURCE_GLOBAL,
     depth       => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_SOURCE_DYNAMIC,
     docsubdir   => VAR_SOURCE_GLOBAL | VAR_SOURCE_PERDIR | VAR_EMPTY_VALUE | VAR_TPL_ALLOW
             | VAR_MERGE_TO_UNDEF
     ,
+
+    winhostsoutput => VAR_SOURCE_GLOBAL,
+    winhosts       => VAR_SOURCE_GLOBAL,
+    winhostsip     => VAR_SOURCE_GLOBAL,
 
     apacheconf  => VAR_SOURCE_GLOBAL,
     apacheoutput => VAR_SOURCE_GLOBAL,
@@ -133,10 +135,11 @@ my $config = {
     time        => undef,
     version     => VERSION,
     dirconfig   => '.vhost',
-    winhosts    => undef,
-    winhostsip  => '127.0.0.1',
     depth       => 2,
     docsubdir   => '',
+    winhostsoutput => 0,
+    winhosts       => undef,
+    winhostsip     => '127.0.0.1',
     apacheconf  => undef,
     apacheoutput => 1,
     port        => undef,
@@ -1174,7 +1177,11 @@ sub mergeDirConfig(\%\%) {
 { my $WinHostsFH;
     # открытие файла на запись, если он включен директивой
     sub WinHostsOpen() {
-        return unless defined $config->{winhosts};
+        return unless $config->{winhostsoutput};
+
+        die "No value specified for WinHosts\n"
+            unless defined $config->{winhosts};
+
         die "WinHostsIP has no value when WinHosts is specified\n"
             unless defined $config->{winhostsip};
 
@@ -1188,7 +1195,7 @@ sub mergeDirConfig(\%\%) {
     # сохранение домена текущего виртуального хоста
     sub WinHostsAdd() {
         return unless $WinHostsFH;
-        print $WinHostsFH "$config->{winhostsip}\t\t$config->{domain}\n";
+        print $WinHostsFH "$config->{winhostsip}    $config->{domain}\n";
         1;
     }
 }
@@ -1863,6 +1870,11 @@ C<UNDEF>, если не описано иное поведение данной 
 
 Необязательно. Не имеет смысла, если не задан B<WinHosts>. IP адрес для записи
 файла F<hosts>. По умолчанию равен I<127.0.0.1> .
+
+=item B<WinHostsOutput> I<bool>
+
+Необязательно. Нужно ли генерировать файл hosts. По умолчанию для обратной
+совместимости равно I<0>, т.е. выключено.
 
 =back
 
