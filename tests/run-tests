@@ -13,6 +13,10 @@ use constant {
     VHOSTGEN_PATH => '../.vhostgen',
     INIT_CONFIG   => 'init-vhost.cfg',
     TREE_CONFIG   => '.vhost.cfg',
+    FILE_TAG_TPL     => '.tpl',
+    FILE_CONF_APACHE => 'apache.conf',
+    FILE_CONF_NGINX  => 'nginx.conf',
+    FILE_CONF_HOSTS  => 'hosts.txt',
 };
 
 {; package VHostGen::Tests::Config;
@@ -189,12 +193,17 @@ sub run_test($$$) {
     my $tree   = "$path/tree";
     my $result = "../result";
 
+    my $apache_conf = "$result/" . FILE_CONF_APACHE;
+    my $nginx_conf  = "$result/" . FILE_CONF_NGINX;
+    my $hosts_conf  = "$result/" . FILE_CONF_HOSTS;
+
+    my $expect        = "$path/expect";
+    my $expect_apache = "$expect/" . FILE_CONF_APACHE . FILE_TAG_TPL;
+    my $expect_nginx  = "$expect/" . FILE_CONF_NGINX  . FILE_TAG_TPL;
+    my $expect_hosts  = "$expect/" . FILE_CONF_HOSTS  . FILE_TAG_TPL;
+
     my $config = VHostGen::Tests::Config->load($tree . '/' . TREE_CONFIG);
     $config->override($parentConfig);
-
-    my $apache_conf = "$result/apache.conf";
-    my $nginx_conf  = "$result/nginx.conf";
-    my $hosts_conf  = "$result/hosts.txt";
 
     my @args = (VHOSTGEN_PATH, '-d', $tree);
     $parentConfig->each(sub {
@@ -209,7 +218,7 @@ sub run_test($$$) {
     my $code = execute_quiet(@args);
     if ($code) {
         fail($name, "exit code was $code");
-        return
+        return;
     }
 
     return 1;
@@ -241,19 +250,28 @@ sub run_tests() {
 
     my @dirs =
         sort { $a cmp $b }
-        grep { $_ ne '.' && $_ ne '..' && -d "$path/$_" }
+        grep { !/^\./ && -d "$path/$_" }
         readdir $dh;
 
     closedir $dh;
 
-    say "Found tests: ", scalar(@dirs);
+    my $total = scalar(@dirs);
 
+    my $passed = 0;
     for my $subdir (@dirs) {
         print "$subdir: ";
-        run_test("$path/$subdir", $subdir, $config)
-            ? say '+'
-            : say 'FAIL';
+        if (run_test("$path/$subdir", $subdir, $config)) {
+            say '+';
+            ++$passed;
+        }
+        else {
+            say 'FAIL';
+        }
     }
+    say '----------------';
+    say "Total : $total";
+    say "Passed: $passed";
+    say 'Failed: ' . ($total - $passed);
     say '';
 }
 
