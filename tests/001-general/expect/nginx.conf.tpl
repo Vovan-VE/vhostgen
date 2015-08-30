@@ -2,7 +2,7 @@
 server {
     listen 80 ;
     server_name example.com  ;
-    root "/home/va/distr/vhostgen/tests/001-general/tree/com/example" ;
+    root "<<$PATH>>/com/example" ;
 
     location / {
         # ...
@@ -12,7 +12,7 @@ server {
 server {
     listen 80 ;
     server_name example.net  ;
-    root "/home/va/distr/vhostgen/tests/001-general/tree/net/example" ;
+    root "<<$PATH>>/net/example" ;
 
     location / {
         # ...
@@ -22,7 +22,7 @@ server {
 server {
     listen 80 ;
     server_name test2.net  ;
-    root "/home/va/distr/vhostgen/tests/001-general/tree/net/test2" ;
+    root "<<$PATH>>/net/test2" ;
 
     location / {
         # ...

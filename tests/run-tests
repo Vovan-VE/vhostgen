@@ -6,8 +6,10 @@ use warnings;
 use 5.010;
 use utf8;
 
+use Cwd ();
 use File::Basename ();
 use IPC::Open2;
+use Data::Dumper;
 
 use constant {
     VHOSTGEN_PATH => '../.vhostgen',
@@ -119,6 +121,7 @@ use constant {
         ref($self) or die 'usage: $obj->get()';
 
         my $vars = $self->{vars};
+        $name = lc $name;
         return $vars->{$name}       if exists $vars->{$name};
 
         my $parent = $self->{parent};
@@ -187,37 +190,59 @@ sub execute_quiet {
     return $?;
 }
 
+sub is_outfile_match_expectation($$$$) {
+    my ($path, $tree, $outfile, $expect) = @_;
+
+    warn "$path [$tree]: $outfile =~ $expect";
+
+    return;
+}
+
 sub run_test($$$) {
     my ($path, $name, $parentConfig) = @_;
 
-    my $tree   = "$path/tree";
-    my $result = "../result";
+    my $tree_dir   = "tree";
+    my $tree_path  = "$path/$tree_dir";
+    my $expect_dir = "expect";
+    my $result_dir = "result";
+    my $result_rel = "../result";
 
-    my $apache_conf = "$result/" . FILE_CONF_APACHE;
-    my $nginx_conf  = "$result/" . FILE_CONF_NGINX;
-    my $hosts_conf  = "$result/" . FILE_CONF_HOSTS;
-
-    my $expect        = "$path/expect";
-    my $expect_apache = "$expect/" . FILE_CONF_APACHE . FILE_TAG_TPL;
-    my $expect_nginx  = "$expect/" . FILE_CONF_NGINX  . FILE_TAG_TPL;
-    my $expect_hosts  = "$expect/" . FILE_CONF_HOSTS  . FILE_TAG_TPL;
-
-    my $config = VHostGen::Tests::Config->load($tree . '/' . TREE_CONFIG);
+    my $config = VHostGen::Tests::Config->load("$tree_path/" . TREE_CONFIG);
     $config->override($parentConfig);
 
-    my @args = (VHOSTGEN_PATH, '-d', $tree);
+    my %tasks;
+    $config->get('ApacheOutput')    and $tasks{ApacheConf} = FILE_CONF_APACHE;
+    $config->get('NginxOutput')     and $tasks{NginxConf}  = FILE_CONF_NGINX;
+    $config->get('WinHostsOutput')  and $tasks{WinHosts}   = FILE_CONF_HOSTS;
+
+    my @args = (VHOSTGEN_PATH, '-d', $tree_path);
+    for my $task (keys %tasks) {
+        push @args, '--configure', "$task=$result_rel/$tasks{$task}";
+    }
     $parentConfig->each(sub {
         my ($name, $value) = @_;
 
         push @args, '--configure', "$name=$value"   if defined $value;
     });
-    $config->get('ApacheOutput')    and push @args, '--configure', "ApacheConf=$apache_conf";
-    $config->get('NginxOutput')     and push @args, '--configure', "NginxConf=$nginx_conf";
-    $config->get('WinHostsOutput')  and push @args, '--configure', "WinHosts=$hosts_conf";
 
     my $code = execute_quiet(@args);
     if ($code) {
         fail($name, "exit code was $code");
+        return;
+    }
+
+    my @mismatch;
+    for my $task (keys %tasks) {
+        my $basename = $tasks{$task};
+        my $outfile = "$result_dir/$basename";
+        my $expect  = "$expect_dir/$basename" . FILE_TAG_TPL;
+
+        is_outfile_match_expectation($path, $tree_dir, $outfile, $expect)
+            or push @mismatch, $task;
+    }
+
+    if (@mismatch) {
+        fail($name, 'output mismatch expectation: ' . join(', ', @mismatch));
         return;
     }
 
@@ -240,7 +265,7 @@ sub init() {
 }
 
 sub run_tests() {
-    my $path = '.';
+    my $path = Cwd::abs_path('.');
 
     say "Read common config";
     my $config = VHostGen::Tests::Config->load($path . '/' . INIT_CONFIG);
