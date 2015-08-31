@@ -1,0 +1,403 @@
+#!/usr/bin/perl
+package VHostGen::Tests;
+
+use strict;
+use warnings;
+use 5.010;
+use utf8;
+
+use Cwd ();
+use File::Basename ();
+use IPC::Open2;
+use Data::Dumper;
+
+use constant {
+    VHOSTGEN_PATH => '../.vhostgen',
+    INIT_CONFIG   => 'init-vhost.cfg',
+    TREE_CONFIG   => '.vhost.cfg',
+    FILE_TAG_TPL     => '.tpl',
+    FILE_CONF_APACHE => 'apache.conf',
+    FILE_CONF_NGINX  => 'nginx.conf',
+    FILE_CONF_HOSTS  => 'hosts.txt',
+};
+
+{; package VHostGen::Tests::Config;
+    # PACKAGE->new()
+    # PACKAGE->new({ NAME => VALUE, ...})
+    sub new {
+        my ($self, $vars) = @_;
+
+        my $class = ref($self) || $self;
+        $vars //= {};
+        ref($vars) eq 'HASH'            or die '$vars must be HASHREF';
+
+        bless {vars => $vars, parent => undef}, $class
+    }
+
+    # PACKAGE->override($parent, { NAME => VALUE, ...})
+    # $object->override($parent)
+    sub override {
+        my ($self, $parent, $vars) = @_;
+
+        ref($parent) eq __PACKAGE__     or die '$parent must be object ' . __PACKAGE__;
+
+        my $that = (ref $self) ? $self : new($self, $vars);
+        $that->{parent} = $parent;
+
+        return $that;
+    }
+
+    # PACKAGE->load($file)
+    # $object->load($file)
+    sub load {
+        my ($self, $file) = @_;
+
+        my $that = (ref $self) ? $self : new($self);
+        my $vars = $that->{vars};
+
+        open(my $f, '<', $file)     or die "cannot read file $file: $!\n";
+
+        eval {
+            while (my $line = <$f>) {
+                next if $line =~ /^#/;
+                chomp $line;
+                next if $line =~ /^\h*$/;
+
+                $line =~ /
+                    ^
+                    (?<name> [a-z]+ )
+                    \h*
+                    (?:
+                        (?<begin> <<<< )
+                    |
+                        (?<= \h )
+                        (?! <+ $ )
+                        (?<inline> .* )
+                    )?
+                    $
+                /ix
+                    or die "invalid config syntax it line $.: [$line]\n";
+
+                my $name   = lc $+{name};
+                my $begin  = $+{begin};
+                my $inline = $+{inline};
+
+                if ($begin) {
+                    my $begin_line = $.;
+                    my $end = 0;
+                    my $text = '';
+                    while (my $string = <$f>) {
+                        chomp(my $str = $string);
+                        if ($str eq '>>>>') {
+                            $end = 1;
+                            last;
+                        }
+                        $text .= $string;
+                    }
+                    $end or die "unclosed multiline value opened at line $begin_line\n";
+                    chomp $text;
+                    $vars->{$name} = $text;
+                }
+                else {
+                    $inline //= '';
+                    $inline =~ s/\h+$//;
+                    $vars->{$name} = $inline;
+                }
+            }
+        };
+        if ($@) {
+            die "config failed $file: $@";
+        }
+
+        close $f;
+
+        return $that;
+    }
+
+    # $object->get($name)
+    sub get {
+        my ($self, $name) = @_;
+
+        ref($self) or die 'usage: $obj->get()';
+
+        my $vars = $self->{vars};
+        $name = lc $name;
+        return $vars->{$name}       if exists $vars->{$name};
+
+        my $parent = $self->{parent};
+        return $parent->get($name)  if $parent;
+
+        return;
+    }
+
+    sub all {
+        my ($self) = @_;
+
+        ref($self) or die 'usage: $obj->all()';
+
+        my $parent = $self->{parent};
+        my %all = ($parent ? $parent->all() : (), %{$self->{vars}});
+    }
+
+    # $object->each(sub { my ($name, $value) = @_; })
+    sub each {
+        my ($self, $sub) = @_;
+
+        ref($self) && ref($sub) eq 'CODE'   or die 'usage: $obj->get($sub)';
+
+        my %all = $self->all();
+        for my $name (keys %all) {
+            $sub->($name, $all{$name});
+        }
+    }
+}
+
+{;
+    my @errors;
+
+    sub fail($$) {
+        my ($test, $message) = @_;
+
+        push @errors, "$test: $message";
+    }
+
+    sub show_conclusion() {
+        unless (@errors) {
+            say "All tests passed";
+            return;
+        }
+
+        for my $message (@errors) {
+            say $message;
+        }
+    }
+
+    sub was_everithing_fine() {
+        return      if @errors;
+        return 1;
+    }
+}
+
+sub execute_quiet {
+    my (@args) = @_;
+
+    @args or die "no arguments";
+
+    my $pid = open2(my $out, my $in, @args);
+    close $in;
+
+    waitpid $pid, 0;
+    return $?;
+}
+
+sub read_file($) {
+    my ($file) = @_;
+
+    local $/;
+    open(my $f, '<', $file) or die "cannot open file '$file': $!\n";
+    my $content = <$f>;
+    close $f;
+    return $content;
+}
+
+sub template_to_regexp($;%) {
+    my ($code, $vars) = @_;
+
+    $vars //= {};
+
+    my %handlers = (
+        '$' => sub {
+            my ($dollar_name) = @_;
+
+            # "$NAME"
+            #  -^^^^
+            my $name = substr($dollar_name, 1);
+            return $vars->{$name} if exists $vars->{$name};
+            return "#$name?";
+        },
+        '/' => sub {
+            my ($regexpCode) = @_;
+
+            my $re;
+            eval {
+                # "/pattern/mods"
+                # =>
+                # "(?mods:pattern)"
+                (my $code = $regexpCode) =~ s~ ^ /(.*)/([a-z]*) $ ~(?$2:$1)~x;
+                $re = qr/$code/;
+            };
+            die "cannot create RegExp: $@"  if $@;
+            return $re;
+        },
+    );
+    my $re_code =
+        qr/
+            <<
+            (?<check>
+                (?:
+                    [^<>]++
+                |
+                    > (?! > )
+                |
+                    (?<! < ) <
+                )++
+            )
+            >>
+        |
+            (?<text>
+                (?:
+                    [^<>]++
+                |
+                    < (?: <{2,} | (?! < ) )
+                |
+                    > (?: >{2,} | (?! > ) )
+                )*+
+            )
+        /x;
+    my @chunks;
+    pos($code) = 0;
+    while ($code =~ /$re_code/g) {
+        my $check = $+{check};
+        my $text  = $+{text};
+
+        if (defined $text) {
+            push @chunks, $text     if $text;
+            next;
+        }
+
+        my $type = substr($check, 0, 1);
+        exists $handlers{$type}         or die "unknown placeholder type: $check\n";
+        push @chunks, $handlers{$type}->($check);
+    }
+
+    @chunks = map { ref() ? $_ : qr/\Q$_\E/ } @chunks;
+    my $re = join('', @chunks);
+    return qr/$re/;
+}
+
+sub is_outfile_match_expectation($$$$) {
+    my ($path, $tree, $outfile, $expect) = @_;
+
+    my $out_file = "$path/$outfile";
+    my $out = read_file("$path/$outfile");
+    my $tpl = read_file("$path/$expect");
+
+    my $re = template_to_regexp($tpl, {
+        PATH => "$path/$tree",
+    });
+
+    return  unless $out =~ m/^$re$/;
+
+    unlink $out_file    or warn "cannot delete useless file '$out_file': $!\n";
+
+    return 1;
+}
+
+sub run_test($$$) {
+    my ($path, $name, $parentConfig) = @_;
+
+    my $tree_dir   = "tree";
+    my $tree_path  = "$path/$tree_dir";
+    my $expect_dir = "expect";
+    my $result_dir = "result";
+    my $result_rel = "../result";
+
+    my $config = VHostGen::Tests::Config->load("$tree_path/" . TREE_CONFIG);
+    $config->override($parentConfig);
+
+    my %tasks;
+    $config->get('ApacheOutput')    and $tasks{ApacheConf} = FILE_CONF_APACHE;
+    $config->get('NginxOutput')     and $tasks{NginxConf}  = FILE_CONF_NGINX;
+    $config->get('WinHostsOutput')  and $tasks{WinHosts}   = FILE_CONF_HOSTS;
+
+    my @args = (VHOSTGEN_PATH, '-d', $tree_path);
+    for my $task (keys %tasks) {
+        push @args, '--configure', "$task=$result_rel/$tasks{$task}";
+    }
+    $parentConfig->each(sub {
+        my ($name, $value) = @_;
+
+        push @args, '--configure', "$name=$value"   if defined $value;
+    });
+
+    my $code = execute_quiet(@args);
+    if ($code) {
+        fail($name, "exit code was $code");
+        return;
+    }
+
+    my @mismatch;
+    for my $task (keys %tasks) {
+        my $basename = $tasks{$task};
+        my $outfile = "$result_dir/$basename";
+        my $expect  = "$expect_dir/$basename" . FILE_TAG_TPL;
+
+        is_outfile_match_expectation($path, $tree_dir, $outfile, $expect)
+            or push @mismatch, $task;
+    }
+
+    if (@mismatch) {
+        fail($name, 'output mismatch expectation: ' . join(', ', @mismatch));
+        return;
+    }
+
+    return 1;
+}
+
+sub init() {
+    # выключить буферизацию
+    $| = 1;
+    my $oldfh = select STDERR;
+    $| = 1;
+    select $oldfh;
+
+    say "Tests for vhostgen";
+
+    my $dir = File::Basename::dirname(__FILE__);
+    say "CD to $dir";
+    chdir $dir              or die "cannot CD to $dir\n";
+    -e -f VHOSTGEN_PATH     or die "cannot locate main program\n";
+}
+
+sub run_tests() {
+    my $path = Cwd::abs_path('.');
+
+    say "Read common config";
+    my $config = VHostGen::Tests::Config->load($path . '/' . INIT_CONFIG);
+
+    say "Search for tests";
+    opendir my $dh, $path   or die "cannot read directory";
+
+    my @dirs =
+        sort { $a cmp $b }
+        grep { !/^\./ && -d "$path/$_" }
+        readdir $dh;
+
+    closedir $dh;
+
+    my $total = scalar(@dirs);
+
+    my $passed = 0;
+    for my $subdir (@dirs) {
+        print "$subdir: ";
+        if (run_test("$path/$subdir", $subdir, $config)) {
+            say '+';
+            ++$passed;
+        }
+        else {
+            say 'FAIL';
+        }
+    }
+    say '----------------';
+    say "Total : $total";
+    say "Passed: $passed";
+    say 'Failed: ' . ($total - $passed);
+    say '';
+}
+
+init();
+run_tests();
+show_conclusion();
+
+was_everithing_fine() or die "some tests are failed\n";
+1;
