@@ -12,5 +12,6 @@ branches:
   only:
     - master
     - devel
+    - /^rc-.*$/
 matrix:
   fast_finish: true
