@@ -190,12 +190,107 @@ sub execute_quiet {
     return $?;
 }
 
+sub read_file($) {
+    my ($file) = @_;
+
+    local $/;
+    open(my $f, '<', $file) or die "cannot open file '$file': $!\n";
+    my $content = <$f>;
+    close $f;
+    return $content;
+}
+
+sub template_to_regexp($;%) {
+    my ($code, $vars) = @_;
+
+    $vars //= {};
+
+    my %handlers = (
+        '$' => sub {
+            my ($dollar_name) = @_;
+
+            # "$NAME"
+            #  -^^^^
+            my $name = substr($dollar_name, 1);
+            return $vars->{$name} if exists $vars->{$name};
+            return "#$name?";
+        },
+        '/' => sub {
+            my ($regexpCode) = @_;
+
+            my $re;
+            eval {
+                # "/pattern/mods"
+                # =>
+                # "(?mods:pattern)"
+                (my $code = $regexpCode) =~ s~ ^ /(.*)/([a-z]*) $ ~(?$2:$1)~x;
+                $re = qr/$code/;
+            };
+            die "cannot create RegExp: $@"  if $@;
+            return $re;
+        },
+    );
+    my $re_code =
+        qr/
+            <<
+            (?<check>
+                (?:
+                    [^<>]++
+                |
+                    > (?! > )
+                |
+                    (?<! < ) <
+                )++
+            )
+            >>
+        |
+            (?<text>
+                (?:
+                    [^<>]++
+                |
+                    < (?: <{2,} | (?! < ) )
+                |
+                    > (?: >{2,} | (?! > ) )
+                )*+
+            )
+        /x;
+    my @chunks;
+    pos($code) = 0;
+    while ($code =~ /$re_code/g) {
+        my $check = $+{check};
+        my $text  = $+{text};
+
+        if (defined $text) {
+            push @chunks, $text     if $text;
+            next;
+        }
+
+        my $type = substr($check, 0, 1);
+        exists $handlers{$type}         or die "unknown placeholder type: $check\n";
+        push @chunks, $handlers{$type}->($check);
+    }
+
+    @chunks = map { ref() ? $_ : qr/\Q$_\E/ } @chunks;
+    my $re = join('', @chunks);
+    return qr/$re/;
+}
+
 sub is_outfile_match_expectation($$$$) {
     my ($path, $tree, $outfile, $expect) = @_;
 
-    warn "$path [$tree]: $outfile =~ $expect";
+    my $out_file = "$path/$outfile";
+    my $out = read_file("$path/$outfile");
+    my $tpl = read_file("$path/$expect");
 
-    return;
+    my $re = template_to_regexp($tpl, {
+        PATH => "$path/$tree",
+    });
+
+    return  unless $out =~ m/^$re$/;
+
+    unlink $out_file    or warn "cannot delete useless file '$out_file': $!\n";
+
+    return 1;
 }
 
 sub run_test($$$) {
